@@ -1,0 +1,66 @@
+﻿FileName;Patient ;Gender  ;DOB     ;Age     ;RecStart;ECG     ;ECGLabel;SmplRate;CSV_version;BName;Duration;Sz start;Sz stop;Spalte1;Gap btw evts;ARTF;BCKG;SEIZ;UNKNOWN;FNSZ;GNSZ
+aaaaabqv_s001_t000.edf;aaaaabqv;F;01-JAN-0000;21;01. Jan 04;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s001_t000;1437;179.884;187.016;7.132;0;0;0;1;0;0;0
+aaaaabqv_s001_t000.edf;aaaaabqv;F;01-JAN-0000;21;01. Jan 04;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s001_t000;1437;242.668;249.928;7.26;0;0;0;1;0;0;0
+aaaaabqv_s001_t000.edf;aaaaabqv;F;01-JAN-0000;21;01. Jan 04;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s001_t000;1437;286.016;293.584;7.568;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;26.868;31.84;4.972;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;182.972;189.192;6.22;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;294.444;301.624;7.18;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;346.352;353.968;7.616;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;399.276;404.824;5.548;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;617.388;622.992;5.604;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;807.256;812.7;5.444;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;1036.976;1042.608;5.632;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;1067.208;1071.876;4.668;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;1118.124;1123.552;5.428;0;0;0;1;0;0;0
+aaaaabqv_s002_t001.edf;aaaaabqv;F;01-JAN-0000;17;01. Jan 00;1;EKG-LE  ;250;csv_v1.0.0;aaaaabqv_s002_t001;1373;1237.208;1240.308;3.1;0;0;0;1;0;0;0
+aaaaaccj_s001_t000.edf;aaaaaccj;F;01-JAN-0000;10;01. Jan 04;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s001_t000;1206;315.34;319.024;3.684;0;0;0;1;0;0;0
+aaaaaccj_s001_t000.edf;aaaaaccj;F;01-JAN-0000;10;01. Jan 04;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s001_t000;1206;327.668;330.032;2.364;0;0;0;1;0;0;0
+aaaaaccj_s001_t000.edf;aaaaaccj;F;01-JAN-0000;10;01. Jan 04;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s001_t000;1206;642.016;645.396;3.38;0;0;0;1;0;0;0
+aaaaaccj_s002_t001.edf;aaaaaccj;F;01-JAN-0000;12;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s002_t001;1217;234.932;242.932;8;0;0;0;1;0;0;0
+aaaaaccj_s002_t001.edf;aaaaaccj;F;01-JAN-0000;12;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s002_t001;1217;249.932;254.932;5;0;0;0;1;0;0;0
+aaaaaccj_s002_t001.edf;aaaaaccj;F;01-JAN-0000;12;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s002_t001;1217;310.344;317.576;7.232;0;0;0;1;0;0;0
+aaaaaccj_s002_t001.edf;aaaaaccj;F;01-JAN-0000;12;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s002_t001;1217;886.712;893.004;6.292;0;0;0;1;0;0;0
+aaaaaccj_s002_t001.edf;aaaaaccj;F;01-JAN-0000;12;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s002_t001;1217;1115.472;1126.972;11.5;0;0;0;1;0;0;0
+aaaaaccj_s003_t001.edf;aaaaaccj;F;01-JAN-0000;14;01. Jan 08;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s003_t001;1418;422.04;430.3;8.26;0;0;0;1;0;0;0
+aaaaaccj_s003_t001.edf;aaaaaccj;F;01-JAN-0000;14;01. Jan 08;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s003_t001;1418;529.312;538.912;9.6;0;0;0;1;0;0;0
+aaaaaccj_s003_t001.edf;aaaaaccj;F;01-JAN-0000;14;01. Jan 08;1;EKG-LE  ;250;csv_v1.0.0;aaaaaccj_s003_t001;1418;604.384;619.236;14.852;0;0;0;1;0;0;0
+aaaaacrb_s001_t001.edf;aaaaacrb;F;01-JAN-0000;9;01. Jan 04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacrb_s001_t001;1241;87.6337;114.068;26.4343;0;0;0;1;0;0;0
+aaaaacrb_s001_t001.edf;aaaaacrb;F;01-JAN-0000;9;01. Jan 04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacrb_s001_t001;1241;786.548;806.372;19.824;0;0;0;1;0;0;0
+aaaaadqe_s001_t001.edf;aaaaadqe;M;01-JAN-0000;5;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadqe_s001_t001;543;12.512;22.228;9.716;0;0;0;1;0;0;0
+aaaaadqe_s001_t001.edf;aaaaadqe;M;01-JAN-0000;5;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadqe_s001_t001;543;111.2969;123.976;12.6791;0;0;0;1;0;0;0
+aaaaadqe_s001_t001.edf;aaaaadqe;M;01-JAN-0000;5;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadqe_s001_t001;543;205.524;228.488;22.964;0;0;0;1;0;0;0
+aaaaadqe_s001_t001.edf;aaaaadqe;M;01-JAN-0000;5;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadqe_s001_t001;543;489.62;505.1053;15.4853;-15.4113;0;0;1;0;0;0
+aaaaadqe_s001_t002.edf;aaaaadqe;M;01-JAN-0000;5;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadqe_s001_t002;482;6.1;19.376;13.276;0;0;0;1;0;0;0
+aaaaadqe_s001_t002.edf;aaaaadqe;M;01-JAN-0000;5;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadqe_s001_t002;482;157.7869;173.128;15.3411;0;0;0;1;0;0;0
+aaaaadqe_s001_t002.edf;aaaaadqe;M;01-JAN-0000;5;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadqe_s001_t002;482;406.032;415.732;9.7;0;0;0;1;0;0;0
+aaaaadqe_s001_t003.edf;aaaaadqe;M;01-JAN-0000;5;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadqe_s001_t003;256;8.916;15.8102;6.8942;-6.8142;0;0;1;0;0;0
+aaaaadqe_s001_t003.edf;aaaaadqe;M;01-JAN-0000;5;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadqe_s001_t003;256;205.524;211.9563;6.4323;0;0;0;1;0;0;0
+aaaaadqe_s001_t004.edf;aaaaadqe;M;01-JAN-0000;5;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadqe_s001_t004;940;281.528;289.004;7.476;0;0;0;1;0;0;0
+aaaaadyf_s001_t001.edf;aaaaadyf;M;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadyf_s001_t001;670;314.992;328.992;14;0;0;0;1;0;0;0
+aaaaadyf_s001_t001.edf;aaaaadyf;M;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadyf_s001_t001;670;351.032;366.516;15.484;0;0;0;1;0;0;0
+aaaaadyf_s001_t001.edf;aaaaadyf;M;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadyf_s001_t001;670;387.704;402.004;14.3;0;0;0;1;0;0;0
+aaaaadyf_s001_t001.edf;aaaaadyf;M;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadyf_s001_t001;670;470.476;484.488;14.012;0;0;0;1;0;0;0
+aaaaadyf_s001_t001.edf;aaaaadyf;M;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadyf_s001_t001;670;546.032;559.056;13.024;0;0;0;1;0;0;0
+aaaaadyf_s001_t001.edf;aaaaadyf;M;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadyf_s001_t001;670;579.056;589.976;10.92;0;0;0;1;0;0;0
+aaaaadyf_s001_t002.edf;aaaaadyf;M;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadyf_s001_t002;2004;716.036;730.684;14.648;0;0;0;1;0;0;0
+aaaaadyf_s001_t002.edf;aaaaadyf;M;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadyf_s001_t002;2004;862.172;874.516;12.344;0;0;0;1;0;0;0
+aaaaadyf_s001_t002.edf;aaaaadyf;M;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadyf_s001_t002;2004;1085.16;1096.748;11.588;0;0;0;1;0;0;0
+aaaaadyf_s001_t002.edf;aaaaadyf;M;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaadyf_s001_t002;2004;1522.508;1536.172;13.664;0;0;0;1;0;0;0
+aaaaaenl_s001_t001.edf;aaaaaenl;F;01-JAN-0000;6;01. Jan 06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaenl_s001_t001;1471;112.012;128.46;16.448;0;0;0;1;0;0;0
+aaaaamtc_s001_t000.edf;aaaaamtc;F;01-JAN-0000;23;01. Jan 12;1;EKG1-REF  ;250;csv_v1.0.0;aaaaamtc_s001_t000;1531;292.9567;298.028;5.0713;0;0;0;1;0;0;0
+aaaaamtc_s001_t000.edf;aaaaamtc;F;01-JAN-0000;23;01. Jan 12;1;EKG1-REF  ;250;csv_v1.0.0;aaaaamtc_s001_t000;1531;328.468;338.068;9.6;0;0;0;1;0;0;0
+aaaaacyi_s001_t001.edf;aaaaacyi;M;01-JAN-0000;7;01-Jan-04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacyi_s001_t001;1459;101.312;111.112;9.8;0;;0;1;0;0;0
+aaaaacyi_s001_t001.edf;aaaaacyi;M;01-JAN-0000;7;01-Jan-04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacyi_s001_t001;1459;121.212;130.212;9;0;;0;1;0;0;0
+aaaaacyi_s001_t001.edf;aaaaacyi;M;01-JAN-0000;7;01-Jan-04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacyi_s001_t001;1459;307.612;315.412;7.8;0;;0;1;0;0;0
+aaaaacyi_s001_t001.edf;aaaaacyi;M;01-JAN-0000;7;01-Jan-04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacyi_s001_t001;1459;436.252;448.352;12.1;0;;0;1;0;0;0
+aaaaacyi_s001_t001.edf;aaaaacyi;M;01-JAN-0000;7;01-Jan-04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacyi_s001_t001;1459;557.196;565.296;8.1;0;;0;1;0;0;0
+aaaaacyi_s001_t001.edf;aaaaacyi;M;01-JAN-0000;7;01-Jan-04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacyi_s001_t001;1459;763.224;775.324;12.1;0;;0;1;0;0;0
+aaaaacyi_s001_t001.edf;aaaaacyi;M;01-JAN-0000;7;01-Jan-04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacyi_s001_t001;1459;802.124;810.324;8.2;0;;0;1;0;0;0
+aaaaacyi_s001_t001.edf;aaaaacyi;M;01-JAN-0000;7;01-Jan-04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacyi_s001_t001;1459;964.496;974.296;9.8;0;;0;1;0;0;0
+aaaaacyi_s001_t001.edf;aaaaacyi;M;01-JAN-0000;7;01-Jan-04;1;EKG-LE  ;250;csv_v1.0.0;aaaaacyi_s001_t001;1459;1166.984;1173.9836;6.9996;0;;0;1;0;0;0
+aaaaaewf_s001_t001.edf;aaaaaewf;M;01-JAN-0000;13;01-Jan-06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaewf_s001_t001;1313;646.02;657.5333;11.5133;0;;0;1;0;0;0
+aaaaaewf_s001_t001.edf;aaaaaewf;M;01-JAN-0000;13;01-Jan-06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaewf_s001_t001;1313;811.572;819.872;8.3;0;;0;1;0;0;0
+aaaaaexe_s001_t001.edf;aaaaaexe;F;01-JAN-0000;13;01-Jan-06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaexe_s001_t001;1426;193.844;200.044;6.2;0;;0;1;0;0;0
+aaaaaexe_s001_t001.edf;aaaaaexe;F;01-JAN-0000;13;01-Jan-06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaexe_s001_t001;1426;287.832;296.532;8.7;0;;0;1;0;0;0
+aaaaaexe_s001_t001.edf;aaaaaexe;F;01-JAN-0000;13;01-Jan-06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaexe_s001_t001;1426;564.304;573.2149;8.9109;0;;0;1;0;0;0
+aaaaaexe_s001_t001.edf;aaaaaexe;F;01-JAN-0000;13;01-Jan-06;1;EKG-LE  ;250;csv_v1.0.0;aaaaaexe_s001_t001;1426;1355.612;1363.312;7.7;0;;0;1;0;0;0

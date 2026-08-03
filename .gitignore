@@ -1,13 +1,13 @@
-*.csv
+
 *.jpg
 *.jpeg
 *.png
 *.gif
 *.webp
 *.svg
+*.pkl
 Data/
 venv/
 __pycache__/
 *.pyc
-*.pkl
 *.png
