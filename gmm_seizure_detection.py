@@ -23,28 +23,25 @@ Warum patientenweise? Fenster desselben Patienten sind sehr aehnlich. Landen
 welche im Training und welche im Test, erkennt das Modell den Patienten wieder
 -> geschoente, wertlose AUC. Deshalb ist jeder Patient KOMPLETT in genau einem
 Fold. Das geht nur ueber die EDFs; die gepoolten eeg_results_*.pkl haben die
-Patientenzuordnung verloren.
+Patientenzuordnung verloren -- fuer den Detektor werden die pkl daher NICHT
+gebraucht (sie bleiben nur fuer die separate Verteilungs-/JS-Analyse relevant).
 
-PKL-Modus (nur zur schnellen Orientierung)
-------------------------------------------
-Die eeg_results_{typ}.pkl enthalten gepoolte Amplituden-Samples ohne Zeitachse
-und ohne Patienten-ID. Damit ist KEINE leckfreie Validierung moeglich; der
-PKL-Modus splittet zwangslaeufig ueber Samples und gibt daher nur eine grobe,
-optimistisch verzerrte Orientierung (mit Warnhinweis).
+Anfall vs. kein Anfall: Aus deiner {TYP}_seizures.csv (Sz start / Sz stop) wird
+pro Aufnahme eine seizure_mask gebaut; jedes 2-s-Fenster wird darueber als
+Anfall (y=1) oder kein Anfall (y=0) gelabelt. Fuer jede der beiden Klassen wird
+ein eigenes GMM gefittet -- die Trennung kommt also direkt aus deinen
+Annotationen.
 
 Nutzung
 -------
-    # Empfohlen: EDF + automatische Wahl LOPO/k-Fold
-    python gmm_seizure_detection.py --seizure-type absz --source edf
+    # ABSZ (wenige Dateien) -> automatisch Leave-One-Patient-Out
+    python gmm_seizure_detection.py --seizure-type absz
 
-    # k-Fold erzwingen (fuer die grossen Typen mit ~200 Dateien)
-    python gmm_seizure_detection.py --seizure-type cpsz --source edf --eval kfold --folds 5
+    # die grossen Typen (~200 Dateien) -> automatisch 5-Fold (oder explizit)
+    python gmm_seizure_detection.py --seizure-type cpsz --eval kfold --folds 5
 
-    # LOPO erzwingen (fuer wenige Patienten, z.B. ABSZ mit 17 Dateien)
-    python gmm_seizure_detection.py --seizure-type absz --source edf --eval lopo
-
-    # Grobe PKL-Orientierung (nicht fuer finale Ergebnisse)
-    python gmm_seizure_detection.py --seizure-type absz --source pkl
+    # laengeres Fenster / mehr Kanaele
+    python gmm_seizure_detection.py --seizure-type absz --window-sec 5 --top-k 15
 
     # Selbsttest ohne echte Daten (synthetisch):
     python gmm_seizure_detection.py --selftest
@@ -52,7 +49,6 @@ Nutzung
 
 import argparse
 import os
-import pickle
 
 import numpy as np
 from scipy import signal as sp_signal
@@ -511,71 +507,7 @@ def run_on_edf(seizure_type, base_path, window_sec=2.0, overlap=0.5,
 
 
 # ===========================================================================
-# 5. PKL-Modus (nur grobe Orientierung -- KEINE leckfreie Validierung!)
-# ===========================================================================
-def _stack_channels(per_channel):
-    """Bringt seizure_data/non_seizure_data auf (n_channels, n_samples)."""
-    if isinstance(per_channel, np.ndarray) and per_channel.ndim == 2:
-        return per_channel
-    arrs = [np.asarray(a).ravel() for a in per_channel]
-    m = min(len(a) for a in arrs)
-    return np.vstack([a[:m] for a in arrs])
-
-
-def run_on_pkl(pkl_path, top_k_channels=10, max_samples_per_class=50000,
-               test_size=0.3, random_state=42):
-    """Grobe Orientierung auf den gepoolten pkl-Amplituden.
-
-    ACHTUNG: Die pkl kennt keine Patienten -> der Split erfolgt ueber Samples,
-    das ist NICHT leckfrei und die AUC ist optimistisch verzerrt. Nur zur
-    schnellen Sichtung, nicht fuer finale Ergebnisse verwenden.
-    """
-    from sklearn.metrics import roc_auc_score
-    from sklearn.model_selection import train_test_split
-
-    print("!" * 64)
-    print("WARNUNG: PKL-Modus splittet ueber Samples (keine Patiententrennung).")
-    print("Die AUC ist dadurch optimistisch verzerrt. Fuer belastbare")
-    print("Ergebnisse den EDF-Modus mit patientenweiser CV verwenden.")
-    print("!" * 64)
-
-    print(f"\nLade EEG-Daten aus: {pkl_path}")
-    with open(pkl_path, "rb") as f:
-        data = pickle.load(f)
-    channel_names = list(data["channel_names"])
-    n_channels = len(channel_names)
-
-    sz = _stack_channels(data["seizure_data"]).T        # (n_iktal, C)
-    ns = _stack_channels(data["non_seizure_data"]).T    # (n_interiktal, C)
-    rng = np.random.default_rng(random_state)
-    if len(sz) > max_samples_per_class:
-        sz = sz[rng.choice(len(sz), max_samples_per_class, replace=False)]
-    if len(ns) > max_samples_per_class:
-        ns = ns[rng.choice(len(ns), max_samples_per_class, replace=False)]
-
-    X = np.vstack([sz, ns])
-    y = np.concatenate([np.ones(len(sz), int), np.zeros(len(ns), int)])
-    print(f"Kanaele: {n_channels}, Samples: {len(sz)} Anfall / {len(ns)} Ruhe")
-
-    ranking = rank_channels_by_js(X, y, n_channels, 1)
-    print("\nKanal-Ranking nach JS-Divergenz (Top 10):")
-    for ch, score in ranking[:10]:
-        print(f"  {channel_names[ch]:<12s}: {score:.4f} bits")
-
-    k = min(top_k_channels, n_channels)
-    top = [ch for ch, _ in ranking[:k]]
-    Xsel = select_channel_features(X, top, 1)
-    Xtr, Xte, ytr, yte = train_test_split(
-        Xsel, y, test_size=test_size, stratify=y, random_state=random_state
-    )
-    clf = GMMClassifier().fit(Xtr, ytr)
-    auc = roc_auc_score(yte, clf.decision_function(Xte))
-    print(f"\nGMM-Klassifikator (verzerrt!): AUC={auc:.3f}")
-    return {"auc_biased": float(auc), "ranking": ranking}
-
-
-# ===========================================================================
-# 6. Selbsttest (synthetisch, ohne echte Daten)
+# 5. Selbsttest (synthetisch, ohne echte Daten)
 # ===========================================================================
 def _make_synthetic_patient(seed, n_channels=6, sampling_rate=256.0,
                             seconds=120, seizure_fraction=0.25):
@@ -618,7 +550,7 @@ def run_selftest():
 
 
 # ===========================================================================
-# 7. CLI
+# 6. CLI
 # ===========================================================================
 def main():
     parser = argparse.ArgumentParser(
@@ -627,19 +559,13 @@ def main():
     )
     parser.add_argument("--selftest", action="store_true",
                         help="Synthetischer Selbsttest ohne echte Daten.")
-    parser.add_argument("--source", choices=["edf", "pkl"], default="edf",
-                        help="edf: empfohlen (patientenweise CV). "
-                             "pkl: nur grobe, verzerrte Orientierung.")
     parser.add_argument("--seizure-type", default=None,
                         help="z.B. absz, cpsz, fnsz, gnsz")
     parser.add_argument("--base", default="/home/data/ninalaemmermann/forschung",
                         help="Basis-Pfad der Forschungsdaten.")
-    parser.add_argument("--pkl", default=None,
-                        help="Direkter Pfad zu einer eeg_results_*.pkl "
-                             "(nur --source pkl).")
     parser.add_argument("--eval", choices=["auto", "lopo", "kfold"],
                         default="auto",
-                        help="Validierungsstrategie (EDF). auto: <=25 Patienten "
+                        help="Validierungsstrategie. auto: <=25 Patienten "
                              "=> LOPO, sonst k-Fold.")
     parser.add_argument("--folds", type=int, default=5,
                         help="Anzahl Folds fuer --eval kfold.")
@@ -658,18 +584,6 @@ def main():
         run_selftest()
         return
 
-    if args.source == "pkl":
-        pkl_path = args.pkl
-        if pkl_path is None and args.seizure_type is not None:
-            pkl_path = os.path.join(
-                args.base, f"eeg_results_{args.seizure_type.lower()}.pkl"
-            )
-        if not pkl_path or not os.path.exists(pkl_path):
-            parser.error(f"pkl nicht gefunden: {pkl_path}")
-        run_on_pkl(pkl_path, top_k_channels=args.top_k)
-        return
-
-    # EDF-Modus (empfohlen)
     if args.seizure_type is None:
         parser.error("Bitte --seizure-type angeben (oder --selftest).")
     run_on_edf(args.seizure_type, args.base, args.window_sec, args.overlap,
