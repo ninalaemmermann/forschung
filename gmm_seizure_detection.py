@@ -43,6 +43,11 @@ Nutzung
     # laengeres Fenster / mehr Kanaele
     python gmm_seizure_detection.py --seizure-type absz --window-sec 5 --top-k 15
 
+    # Feature-Gruppen vergleichen (welche Merkmale trennen am besten?)
+    python gmm_seizure_detection.py --seizure-type absz --features all
+    python gmm_seizure_detection.py --seizure-type absz --features bandpower
+    python gmm_seizure_detection.py --seizure-type absz --features linelength
+
     # Selbsttest ohne echte Daten (synthetisch):
     python gmm_seizure_detection.py --selftest
 """
@@ -68,6 +73,16 @@ FREQ_BANDS = {
 
 # Namen der Pro-Kanal-Features in fester Reihenfolge
 FEATURE_NAMES = list(FREQ_BANDS.keys()) + ["line_length", "variance", "rms"]
+
+# Auswaehlbare Feature-Gruppen (Indizes in FEATURE_NAMES) fuer den Vergleich
+# "welche Merkmale trennen bei meinen Anfaellen am besten?"
+FEATURE_GROUPS = {
+    "all":        [0, 1, 2, 3, 4, 5, 6, 7],  # Bandpower + Line-Length + Var + RMS
+    "bandpower":  [0, 1, 2, 3, 4],           # nur die 5 Frequenzbaender
+    "linelength": [5],                       # nur Line-Length (starkes Einzelmerkmal)
+    "energy":     [6, 7],                    # nur Varianz + RMS
+    "timedomain": [5, 6, 7],                 # Zeitbereich ohne Spektrum
+}
 
 # Ab wie vielen Patienten von LOPO auf k-Fold umgeschaltet wird (--eval auto)
 AUTO_LOPO_MAX_PATIENTS = 25
@@ -358,20 +373,38 @@ def _subsample_negatives(X, y, max_neg, rng):
     return X[keep], y[keep]
 
 
+def reduce_to_feature_group(X, n_channels, feature_group,
+                            n_feat_full=len(FEATURE_NAMES)):
+    """Reduziert die vollen 8 Features/Kanal auf die gewaehlte Gruppe.
+
+    X ist (n_windows, n_channels*n_feat_full) mit interleavtem Layout
+    [ch0_f0..ch0_f7, ch1_f0..ch1_f7, ...]. Zurueck kommt X nur mit den Feature-
+    Spalten der Gruppe je Kanal, plus die neue Feature-Zahl pro Kanal.
+    """
+    keep = FEATURE_GROUPS[feature_group]
+    cols = []
+    for ch in range(n_channels):
+        base = ch * n_feat_full
+        cols.extend(base + i for i in keep)
+    return X[:, cols], len(keep)
+
+
 def cross_validate_patients(patients, channel_names, top_k_channels=10,
-                            eval_mode="auto", n_folds=5,
+                            eval_mode="auto", n_folds=5, n_feat=len(FEATURE_NAMES),
                             max_neg_per_fold=40000, random_state=42):
     """Patientenweise Kreuzvalidierung des GMM-Detektors.
 
     Pro Fold: Kanalauswahl (JS) NUR auf Trainingspatienten, GMMs auf Training
     fitten, auf den gehaltenen Testpatienten AUC berechnen. Keine Patienten-
     ueberschneidung zwischen Training und Test.
+
+    n_feat = Anzahl Features pro Kanal (haengt von der gewaehlten Feature-Gruppe
+    ab; die patients-X muessen bereits entsprechend reduziert sein).
     """
     from sklearn.metrics import roc_auc_score
 
     n_patients = len(patients)
     n_channels = len(channel_names)
-    n_feat = len(FEATURE_NAMES)
     rng = np.random.default_rng(random_state)
 
     if n_patients < 2:
@@ -475,8 +508,12 @@ def cross_validate_patients(patients, channel_names, top_k_channels=10,
 
 def run_on_edf(seizure_type, base_path, window_sec=2.0, overlap=0.5,
                top_k_channels=10, eval_mode="auto", n_folds=5,
-               max_neg_per_fold=40000, random_state=42):
-    """EDF-Pipeline: patientenweise einlesen + patientenweise Kreuzvalidierung."""
+               feature_group="all", max_neg_per_fold=40000, random_state=42):
+    """EDF-Pipeline: patientenweise einlesen + patientenweise Kreuzvalidierung.
+
+    feature_group waehlt die Merkmalsmenge (siehe FEATURE_GROUPS): "all",
+    "bandpower", "linelength", "energy" oder "timedomain".
+    """
     from Verteilungsfkt import get_sz_start_end
 
     st = seizure_type.upper()
@@ -494,14 +531,26 @@ def run_on_edf(seizure_type, base_path, window_sec=2.0, overlap=0.5,
         print("Keine Daten extrahiert - Abbruch.")
         return None
 
+    n_channels = len(channel_names)
+
+    # Auf die gewaehlte Feature-Gruppe reduzieren (Extraktion bleibt vollstaendig,
+    # es werden nur die genutzten Feature-Spalten je Kanal ausgewaehlt).
+    used_names = [FEATURE_NAMES[i] for i in FEATURE_GROUPS[feature_group]]
+    n_feat = len(FEATURE_GROUPS[feature_group])
+    if feature_group != "all":
+        for p in patients:
+            p["X"], _ = reduce_to_feature_group(p["X"], n_channels, feature_group)
+
     total_windows = sum(len(p["y"]) for p in patients)
     total_sz = sum(int(p["y"].sum()) for p in patients)
     print(f"\n{len(patients)} Patienten, {total_windows} Fenster gesamt, "
-          f"{total_sz} Anfalls-Fenster, {len(channel_names)} Kanaele\n")
+          f"{total_sz} Anfalls-Fenster, {n_channels} Kanaele")
+    print(f"Feature-Gruppe '{feature_group}': {n_feat} Feature(s)/Kanal "
+          f"({', '.join(used_names)})\n")
 
     return cross_validate_patients(
         patients, channel_names, top_k_channels=top_k_channels,
-        eval_mode=eval_mode, n_folds=n_folds,
+        eval_mode=eval_mode, n_folds=n_folds, n_feat=n_feat,
         max_neg_per_fold=max_neg_per_fold, random_state=random_state,
     )
 
@@ -571,6 +620,10 @@ def main():
                         help="Anzahl Folds fuer --eval kfold.")
     parser.add_argument("--top-k", type=int, default=10,
                         help="Anzahl der besten Kanaele fuers GMM.")
+    parser.add_argument("--features", choices=list(FEATURE_GROUPS.keys()),
+                        default="all",
+                        help="Merkmalsmenge: all (Bandpower+LL+Var+RMS), "
+                             "bandpower, linelength, energy, timedomain.")
     parser.add_argument("--window-sec", type=float, default=2.0,
                         help="Fensterlaenge in Sekunden (z.B. 5.0).")
     parser.add_argument("--overlap", type=float, default=0.5,
@@ -587,7 +640,8 @@ def main():
     if args.seizure_type is None:
         parser.error("Bitte --seizure-type angeben (oder --selftest).")
     run_on_edf(args.seizure_type, args.base, args.window_sec, args.overlap,
-               args.top_k, args.eval, args.folds, args.max_neg_per_fold)
+               args.top_k, args.eval, args.folds, args.features,
+               args.max_neg_per_fold)
 
 
 if __name__ == "__main__":
