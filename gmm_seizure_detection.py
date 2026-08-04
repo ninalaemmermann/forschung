@@ -144,22 +144,18 @@ def extract_window_features(signal_data, sampling_rate, seizure_mask,
 
 
 def build_patient_datasets(seizure_dict, data_folder, window_sec=2.0,
-                           overlap=0.5, n_channels_fix=None, verbose=True):
+                           overlap=0.5, verbose=True):
     """Liest die EDFs PATIENTENWEISE ein und extrahiert Fenster-Features.
 
     Anders als beim Poolen (wie in der pkl) bleibt hier die Patientenzuordnung
     erhalten -- Voraussetzung fuer eine leckfreie, patientenweise Validierung.
 
     Kanalzahl-Abgleich: Patienten koennen unterschiedlich viele Kanaele haben.
-    Damit die Feature-Matrizen zusammenpassen, wird ein gemeinsamer Kanalsatz
-    verwendet:
-      * n_channels_fix gesetzt -> genau die ersten n_channels_fix Kanaele;
-        Patienten mit weniger Kanaelen werden uebersprungen (mit Meldung).
-      * n_channels_fix None    -> das gemeinsame Minimum ueber alle Patienten
-        (mit Warnung, falls die Kanalzahlen abweichen).
-    Da die Kanaele nur positionell benannt sind (Ch_1..Ch_n), erfolgt der
-    Abgleich nach Position -- das setzt eine konsistente Kanalreihenfolge in
-    allen Aufnahmen voraus.
+    Damit die Feature-Matrizen zusammenpassen, wird das gemeinsame Minimum ueber
+    alle Patienten verwendet (mit Warnung, falls die Kanalzahlen abweichen). Da
+    die Kanaele nur positionell benannt sind (Ch_1..Ch_n), erfolgt der Abgleich
+    nach Position -- das setzt eine konsistente Kanalreihenfolge in allen
+    Aufnahmen voraus.
 
     Returns
     -------
@@ -181,16 +177,6 @@ def build_patient_datasets(seizure_dict, data_folder, window_sec=2.0,
             sampling_rate = raw.info["sfreq"]
             sig = raw.get_data()
             n_channels, n_samples = sig.shape
-
-            # Feste Kanalzahl erzwingen (Patienten mit zu wenigen ueberspringen)
-            if n_channels_fix is not None:
-                if n_channels < n_channels_fix:
-                    print(f"  Patient {patient}: nur {n_channels} Kanaele "
-                          f"(< {n_channels_fix}) -> uebersprungen.")
-                    del sig, raw
-                    continue
-                sig = sig[:n_channels_fix]
-                n_channels = n_channels_fix
 
             if first_ch_names is None:
                 first_ch_names = list(raw.ch_names)
@@ -230,7 +216,7 @@ def build_patient_datasets(seizure_dict, data_folder, window_sec=2.0,
         print(f"\nWARNUNG: unterschiedliche Kanalzahlen "
               f"({min(counts)}..{max(counts)}). Angleich auf gemeinsame "
               f"{target} Kanaele (nach Position). Reihenfolge-Konsistenz "
-              f"bitte pruefen; alternativ --n-channels setzen.")
+              f"bitte pruefen.")
     for p in patients:
         if p["n_ch"] > target:
             p["X"] = p["X"][:, :target * n_feat_full]
@@ -550,13 +536,11 @@ def cross_validate_patients(patients, channel_names, top_k_channels=10,
 
 def run_on_edf(seizure_type, base_path, window_sec=2.0, overlap=0.5,
                top_k_channels=10, eval_mode="auto", n_folds=5,
-               feature_group="all", n_channels_fix=None,
-               max_neg_per_fold=40000, random_state=42):
+               feature_group="all", max_neg_per_fold=40000, random_state=42):
     """EDF-Pipeline: patientenweise einlesen + patientenweise Kreuzvalidierung.
 
     feature_group waehlt die Merkmalsmenge (siehe FEATURE_GROUPS): "all",
     "bandpower", "linelength", "energy" oder "timedomain".
-    n_channels_fix erzwingt eine feste Kanalzahl (sonst gemeinsames Minimum).
     """
     from Verteilungsfkt import get_sz_start_end
 
@@ -569,8 +553,7 @@ def run_on_edf(seizure_type, base_path, window_sec=2.0, overlap=0.5,
 
     print("Lese EDFs patientenweise und extrahiere Fenster-Features ...")
     patients, channel_names = build_patient_datasets(
-        seizure_dict, data_folder, window_sec, overlap,
-        n_channels_fix=n_channels_fix
+        seizure_dict, data_folder, window_sec, overlap
     )
     if not patients:
         print("Keine Daten extrahiert - Abbruch.")
@@ -665,9 +648,6 @@ def main():
                         help="Anzahl Folds fuer --eval kfold.")
     parser.add_argument("--top-k", type=int, default=10,
                         help="Anzahl der besten Kanaele fuers GMM.")
-    parser.add_argument("--n-channels", type=int, default=None,
-                        help="Feste Kanalzahl (erste N je Aufnahme). Ohne "
-                             "Angabe: gemeinsames Minimum ueber alle Patienten.")
     parser.add_argument("--features", choices=list(FEATURE_GROUPS.keys()),
                         default="all",
                         help="Merkmalsmenge: all (Bandpower+LL+Var+RMS), "
@@ -689,7 +669,7 @@ def main():
         parser.error("Bitte --seizure-type angeben (oder --selftest).")
     run_on_edf(args.seizure_type, args.base, args.window_sec, args.overlap,
                args.top_k, args.eval, args.folds, args.features,
-               args.n_channels, args.max_neg_per_fold)
+               args.max_neg_per_fold)
 
 
 if __name__ == "__main__":
