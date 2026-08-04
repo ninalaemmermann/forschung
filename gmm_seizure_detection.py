@@ -2,47 +2,51 @@
 GMM-basierte Anfalls-Detektion auf den vorhandenen EEG-Daten.
 
 Dieser Code ergaenzt die bestehende Verteilungs-/JS-Divergenz-Analyse um einen
-generativen Klassifikator (Gaussian Mixture Model). Er ist auf DEIN echtes
-Datenformat ausgerichtet und laeuft ohne Anpassung auf dem Forschungsserver.
+generativen Klassifikator (Gaussian Mixture Model) UND validiert ihn methodisch
+sauber -- naemlich patientenweise (kein Datenleck).
 
-Zwei Betriebsmodi
------------------
-1) PKL-Modus (Standard, empfohlen)  ->  nutzt deine eeg_results_{typ}.pkl
-   Format wie von Verteilungsfkt.py / data_loader.py erwartet:
-       {
-         'channel_names'   : [27 Namen],
-         'seizure_data'    : Liste/Array (27, n_iktal),      # Amplituden-Samples
-         'non_seizure_data': Liste/Array (27, n_interiktal), # Amplituden-Samples
-       }
-   Jeder Zeitpunkt liefert einen 27-dim. Amplitudenvektor. Darauf werden
-   - die Kanaele per JS-Divergenz gerankt (gleiche Methode wie in
-     compare_js_divergence_channels.py) und
-   - je ein GMM fuer "Anfall" / "kein Anfall" gefittet (Likelihood-Ratio),
-   - zusaetzlich ein reiner Anomalie-Detektor (nur interiktal gefittet).
+Empfohlener Weg: EDF-Modus mit patientenweiser Kreuzvalidierung
+---------------------------------------------------------------
+- Aus den rohen EDFs werden pro 2-s-Fenster Features extrahiert
+  (Bandpower delta..gamma, Line-Length, Varianz, RMS je Fenster und Kanal).
+- Die Kanaele werden per JS-Divergenz gerankt (gleiche Methode wie in
+  compare_js_divergence_channels.py) -- die Auswahl passiert INNERHALB jedes
+  Folds nur auf den Trainingspatienten (leckfrei).
+- Je ein GMM fuer "Anfall" / "kein Anfall" (Entscheidung ueber Likelihood-Ratio),
+  zusaetzlich ein Anomalie-Detektor (nur interiktal gefittet).
+- Validierung ueber Patienten-Folds:
+    * wenige Patienten  -> Leave-One-Patient-Out (LOPO)
+    * viele Patienten   -> gruppiertes k-Fold (z.B. 5-Fold)
+  Ergebnis: mittlere AUC +/- Std ueber die Folds.
 
-   Wissenschaftlicher Hinweis: Die pkl enthaelt reine Amplituden-Samples ohne
-   Zeitachse. Roh-Amplituden von Anfall/Nicht-Anfall ueberlappen stark (genau
-   das zeigt deine JS-Analyse). Das GMM darauf ist die direkt vergleichbare
-   generative Variante zu deiner JS-Divergenz. Fuer klar bessere Trennung siehe
-   Modus 2.
+Warum patientenweise? Fenster desselben Patienten sind sehr aehnlich. Landen
+welche im Training und welche im Test, erkennt das Modell den Patienten wieder
+-> geschoente, wertlose AUC. Deshalb ist jeder Patient KOMPLETT in genau einem
+Fold. Das geht nur ueber die EDFs; die gepoolten eeg_results_*.pkl haben die
+Patientenzuordnung verloren.
 
-2) EDF-Modus (optional, staerker)  ->  nutzt die rohen EDFs + *_seizures.csv
-   Extrahiert Fenster-Features (Bandpower delta..gamma, Line-Length, Varianz,
-   RMS pro 2-s-Fenster und Kanal). Diese gewinnen die spektrale/zeitliche
-   Information zurueck, die in der gepoolten pkl verloren geht.
+PKL-Modus (nur zur schnellen Orientierung)
+------------------------------------------
+Die eeg_results_{typ}.pkl enthalten gepoolte Amplituden-Samples ohne Zeitachse
+und ohne Patienten-ID. Damit ist KEINE leckfreie Validierung moeglich; der
+PKL-Modus splittet zwangslaeufig ueber Samples und gibt daher nur eine grobe,
+optimistisch verzerrte Orientierung (mit Warnhinweis).
 
 Nutzung
 -------
-    # Standard: auf deine pkl anwenden (Pfad wird aus --base + --seizure-type gebaut)
-    python gmm_seizure_detection.py --seizure-type cpsz
+    # Empfohlen: EDF + automatische Wahl LOPO/k-Fold
+    python gmm_seizure_detection.py --seizure-type absz --source edf
 
-    # oder pkl direkt angeben
-    python gmm_seizure_detection.py --pkl /home/data/ninalaemmermann/forschung/eeg_results_cpsz.pkl
+    # k-Fold erzwingen (fuer die grossen Typen mit ~200 Dateien)
+    python gmm_seizure_detection.py --seizure-type cpsz --source edf --eval kfold --folds 5
 
-    # staerkerer EDF-Fenster-Modus (braucht Data/{TYP}_seizure_WB/ + {TYP}_seizures.csv)
-    python gmm_seizure_detection.py --seizure-type cpsz --source edf
+    # LOPO erzwingen (fuer wenige Patienten, z.B. ABSZ mit 17 Dateien)
+    python gmm_seizure_detection.py --seizure-type absz --source edf --eval lopo
 
-    # Selbsttest ohne echte Daten (synthetisch), prueft beide Pfade:
+    # Grobe PKL-Orientierung (nicht fuer finale Ergebnisse)
+    python gmm_seizure_detection.py --seizure-type absz --source pkl
+
+    # Selbsttest ohne echte Daten (synthetisch):
     python gmm_seizure_detection.py --selftest
 """
 
@@ -57,7 +61,7 @@ from scipy.spatial.distance import jensenshannon
 # np.trapz wurde in numpy 2.0 zu np.trapezoid umbenannt -> versionssicher
 _trapz = getattr(np, "trapezoid", getattr(np, "trapz", None))
 
-# Standard-Frequenzbaender (Hz) fuer die Bandpower-Features (EDF-Modus)
+# Standard-Frequenzbaender (Hz) fuer die Bandpower-Features
 FREQ_BANDS = {
     "delta": (0.5, 4.0),
     "theta": (4.0, 8.0),
@@ -66,47 +70,129 @@ FREQ_BANDS = {
     "gamma": (30.0, 45.0),
 }
 
-# Namen der Pro-Kanal-Features in fester Reihenfolge (EDF-Modus)
+# Namen der Pro-Kanal-Features in fester Reihenfolge
 FEATURE_NAMES = list(FREQ_BANDS.keys()) + ["line_length", "variance", "rms"]
 
+# Ab wie vielen Patienten von LOPO auf k-Fold umgeschaltet wird (--eval auto)
+AUTO_LOPO_MAX_PATIENTS = 25
+
 
 # ===========================================================================
-# Gemeinsame Helfer
+# 1. Fenster-Feature-Extraktion
 # ===========================================================================
-def _stack_channels(per_channel):
-    """Bringt seizure_data / non_seizure_data auf ein (n_channels, n_samples)-Array.
+def _bandpowers(window, sampling_rate):
+    """Relative Bandpower je Frequenzband via Welch-PSD."""
+    nperseg = int(min(len(window), max(32, sampling_rate)))
+    freqs, psd = sp_signal.welch(window, fs=sampling_rate, nperseg=nperseg)
+    total = _trapz(psd, freqs)
+    if total <= 0:
+        return np.zeros(len(FREQ_BANDS))
+    powers = []
+    for low, high in FREQ_BANDS.values():
+        mask = (freqs >= low) & (freqs < high)
+        band = _trapz(psd[mask], freqs[mask]) if mask.any() else 0.0
+        powers.append(band / total)
+    return np.array(powers)
 
-    Akzeptiert bereits (C, N)-Arrays oder Listen von 1D-Arrays. Falls die Kanaele
-    unterschiedlich lang sind, wird auf die kuerzeste Laenge gekuerzt (mit Hinweis).
+
+def _window_features(window, sampling_rate):
+    """Feature-Vektor fuer ein einzelnes Fenster eines Kanals."""
+    band = _bandpowers(window, sampling_rate)
+    line_length = np.sum(np.abs(np.diff(window)))
+    variance = np.var(window)
+    rms = np.sqrt(np.mean(window ** 2))
+    return np.concatenate([band, [line_length, variance, rms]])
+
+
+def extract_window_features(signal_data, sampling_rate, seizure_mask,
+                            window_sec=2.0, overlap=0.5):
+    """Zerlegt ein Mehrkanal-Signal in ueberlappende Fenster und extrahiert Features.
+
+    Returns X (n_windows, n_channels*n_features) und y (n_windows,), y=1 => Anfall.
     """
-    if isinstance(per_channel, np.ndarray) and per_channel.ndim == 2:
-        return per_channel
-    arrs = [np.asarray(a).ravel() for a in per_channel]
-    lengths = [len(a) for a in arrs]
-    m = min(lengths)
-    if max(lengths) != m:
-        print(f"  Hinweis: Kanaele unterschiedlich lang ({m}..{max(lengths)}), "
-              f"kuerze auf {m} Samples/Kanal.")
-    return np.vstack([a[:m] for a in arrs])
+    n_channels, n_samples = signal_data.shape
+    win = int(round(window_sec * sampling_rate))
+    if win < 2 or n_samples < win:
+        return np.empty((0, 0)), np.empty((0,), dtype=int)
+
+    step = max(1, int(round(win * (1.0 - overlap))))
+    starts = range(0, n_samples - win + 1, step)
+
+    X, y = [], []
+    for s in starts:
+        e = s + win
+        feats = [
+            _window_features(signal_data[ch, s:e], sampling_rate)
+            for ch in range(n_channels)
+        ]
+        X.append(np.concatenate(feats))
+        # Fenster gilt als Anfall, wenn die Mehrheit der Samples iktal ist
+        y.append(int(seizure_mask[s:e].mean() >= 0.5))
+
+    return np.asarray(X), np.asarray(y, dtype=int)
 
 
-def _subsample(X, n_max, rng):
-    """Zieht hoechstens n_max Zeilen (ohne Zuruecklegen) aus X."""
-    if n_max and len(X) > n_max:
-        idx = rng.choice(len(X), size=n_max, replace=False)
-        return X[idx]
-    return X
+def build_patient_datasets(seizure_dict, data_folder, window_sec=2.0,
+                           overlap=0.5, verbose=True):
+    """Liest die EDFs PATIENTENWEISE ein und extrahiert Fenster-Features.
+
+    Anders als beim Poolen (wie in der pkl) bleibt hier die Patientenzuordnung
+    erhalten -- Voraussetzung fuer eine leckfreie, patientenweise Validierung.
+
+    Returns
+    -------
+    patients : Liste von dicts {'patient', 'X', 'y'}
+    channel_names : Liste der echten Kanalnamen (raw.ch_names)
+    """
+    import mne  # lokaler Import: nur im EDF-Modus noetig
+
+    patients = []
+    channel_names = None
+
+    for i, (patient, sz_start_end) in enumerate(seizure_dict.items()):
+        file_path = os.path.join(
+            data_folder, f"{patient}_res.OWN11101_filtWB_avg.edf"
+        )
+        try:
+            raw = mne.io.read_raw_edf(file_path, preload=False, verbose=False)
+            sampling_rate = raw.info["sfreq"]
+            sig = raw.get_data()
+            n_channels, n_samples = sig.shape
+
+            if channel_names is None:
+                channel_names = list(raw.ch_names)  # echte Kanalnamen
+
+            seizure_mask = np.zeros(n_samples, dtype=bool)
+            for start_time, end_time in sz_start_end:
+                a = int(max(0, start_time * sampling_rate))
+                b = int(min(n_samples, end_time * sampling_rate))
+                if a < b:
+                    seizure_mask[a:b] = True
+
+            X, y = extract_window_features(
+                sig, sampling_rate, seizure_mask, window_sec, overlap
+            )
+            if X.size:
+                patients.append({"patient": patient, "X": X, "y": y})
+
+            if verbose:
+                n_sz = int(y.sum()) if X.size else 0
+                print(f"  Patient {i+1}: {patient} -> "
+                      f"{len(y) if X.size else 0} Fenster ({n_sz} Anfall)")
+
+            del sig, raw
+        except Exception as e:  # noqa: BLE001 - Robustheit wie im Bestandscode
+            print(f"Fehler bei Patient {patient}: {e}")
+            continue
+
+    return patients, (channel_names or [])
 
 
 # ===========================================================================
-# Kanalauswahl per JS-Divergenz (spiegelt compare_js_divergence_channels.py)
+# 2. Kanalauswahl per JS-Divergenz (spiegelt compare_js_divergence_channels.py)
 # ===========================================================================
 def js_divergence_1d(a, b, n_bins=50):
-    """JS-Divergenz (Basis 2, in bit) zwischen zwei 1D-Stichproben.
-
-    Gleiche Konvention wie compare_js_divergence_channels.py: gemeinsamer
-    Wertebereich, Normierung zur Wahrscheinlichkeit, Epsilon 1e-10 gegen log(0).
-    """
+    """JS-Divergenz (Basis 2, in bit) zwischen zwei 1D-Stichproben."""
     if len(a) == 0 or len(b) == 0:
         return 0.0
     lo = min(a.min(), b.min())
@@ -129,14 +215,7 @@ def js_divergence_1d(a, b, n_bins=50):
 
 def rank_channels_by_js(X, y, n_channels, n_features_per_channel,
                         aggregate="max", n_bins=50):
-    """Rangfolge der Kanaele nach Trennschaerfe (JS-Divergenz der Features).
-
-    Fuer jeden Kanal wird die JS-Divergenz zwischen Anfall/Nicht-Anfall ueber
-    seine Feature-Spalten berechnet und aggregiert (max oder mean). Im PKL-Modus
-    ist n_features_per_channel=1 (nur die Amplitude).
-
-    Returns Liste von (kanal_index, score), absteigend sortiert.
-    """
+    """Rangfolge der Kanaele nach Trennschaerfe (JS-Divergenz der Features)."""
     sz = y == 1
     ns = y == 0
     scores = []
@@ -162,7 +241,7 @@ def select_channel_features(X, channel_indices, n_features_per_channel):
 
 
 # ===========================================================================
-# GMM-Klassifikator
+# 3. GMM-Klassifikator
 # ===========================================================================
 class GMMClassifier:
     """Generativer Klassifikator aus zwei GMMs (Anfall / kein Anfall).
@@ -219,7 +298,6 @@ class GMMClassifier:
             raise ValueError("Beide Klassen muessen Beispiele enthalten.")
         self.gmm_pos = self._fit_best_gmm(Xp)
         self.gmm_neg = self._fit_best_gmm(Xn)
-        # Klassen-Prior aus den Haeufigkeiten
         self.log_prior_ratio = np.log(len(Xp) / len(Xn))
         return self
 
@@ -238,7 +316,6 @@ class GMMAnomalyDetector:
     """Anomalie-Detektor: nur auf interiktalen (kein Anfall) Daten gefittet.
 
     Score = negative Log-Likelihood; hoehere Werte = anomaler (eher Anfall).
-    Nuetzlich, wenn zu wenige Anfallsfenster fuer ein zweites GMM vorliegen.
     """
 
     def __init__(self, n_components_grid=(1, 2, 3, 4, 5),
@@ -257,220 +334,153 @@ class GMMAnomalyDetector:
 
 
 # ===========================================================================
-# Auswertung
+# 4. Patientenweise Kreuzvalidierung (LOPO oder gruppiertes k-Fold)
 # ===========================================================================
-def evaluate(scores, y_true):
-    """AUC und beste Youden-Schwelle aus kontinuierlichen Scores."""
-    from sklearn.metrics import roc_auc_score, roc_curve
+def _make_patient_folds(n_patients, n_splits):
+    """Teilt Patienten-Indizes deterministisch in n_splits Gruppen (Round-Robin).
 
-    auc = roc_auc_score(y_true, scores)
-    fpr, tpr, thr = roc_curve(y_true, scores)
-    youden = tpr - fpr
-    best = int(np.argmax(youden))
-    return {
-        "auc": float(auc),
-        "best_threshold": float(thr[best]),
-        "tpr_at_best": float(tpr[best]),
-        "fpr_at_best": float(fpr[best]),
-    }
-
-
-# ===========================================================================
-# PKL-Pipeline (Standard) -- direkt auf deinen eeg_results_{typ}.pkl
-# ===========================================================================
-def _amplitude_dataset(seizure_data, non_seizure_data, max_samples_per_class,
-                       random_state=42):
-    """Baut aus den gepoolten pkl-Samples ein (X, y) fuer die GMM-Pipeline.
-
-    Jeder Zeitpunkt = ein Amplitudenvektor ueber alle Kanaele.
+    n_splits == n_patients ergibt LOPO (jede Gruppe genau ein Patient).
+    Returns Liste von Arrays mit Test-Patienten-Indizes je Fold.
     """
-    sz = _stack_channels(seizure_data)        # (C, n_iktal)
-    ns = _stack_channels(non_seizure_data)    # (C, n_interiktal)
-    if sz.shape[0] != ns.shape[0]:
-        raise ValueError("Anfall/Nicht-Anfall haben unterschiedliche Kanalzahl.")
-
-    rng = np.random.default_rng(random_state)
-    Xpos = _subsample(sz.T, max_samples_per_class, rng)   # (n, C)
-    Xneg = _subsample(ns.T, max_samples_per_class, rng)
-
-    X = np.vstack([Xpos, Xneg])
-    y = np.concatenate([np.ones(len(Xpos), dtype=int),
-                        np.zeros(len(Xneg), dtype=int)])
-    return X, y
+    n_splits = int(min(max(2, n_splits), n_patients))
+    folds = [[] for _ in range(n_splits)]
+    for idx in range(n_patients):
+        folds[idx % n_splits].append(idx)
+    return [np.array(f) for f in folds]
 
 
-def run_on_data_dict(data, top_k_channels=10, max_samples_per_class=50000,
-                     test_size=0.3, random_state=42):
-    """Fuehrt die komplette PKL-Pipeline auf einem bereits geladenen dict aus."""
-    from sklearn.model_selection import train_test_split
+def _subsample_negatives(X, y, max_neg, rng):
+    """Behaelt alle Anfalls-Fenster, begrenzt die Ruhe-Fenster auf max_neg."""
+    if not max_neg:
+        return X, y
+    neg_idx = np.where(y == 0)[0]
+    pos_idx = np.where(y == 1)[0]
+    if len(neg_idx) > max_neg:
+        neg_idx = rng.choice(neg_idx, size=max_neg, replace=False)
+    keep = np.concatenate([pos_idx, neg_idx])
+    keep.sort()
+    return X[keep], y[keep]
 
-    channel_names = list(data["channel_names"])
+
+def cross_validate_patients(patients, channel_names, top_k_channels=10,
+                            eval_mode="auto", n_folds=5,
+                            max_neg_per_fold=40000, random_state=42):
+    """Patientenweise Kreuzvalidierung des GMM-Detektors.
+
+    Pro Fold: Kanalauswahl (JS) NUR auf Trainingspatienten, GMMs auf Training
+    fitten, auf den gehaltenen Testpatienten AUC berechnen. Keine Patienten-
+    ueberschneidung zwischen Training und Test.
+    """
+    from sklearn.metrics import roc_auc_score
+
+    n_patients = len(patients)
     n_channels = len(channel_names)
-    print(f"Kanaele: {n_channels}  (z.B. {channel_names[:5]} ...)")
+    n_feat = len(FEATURE_NAMES)
+    rng = np.random.default_rng(random_state)
 
-    X, y = _amplitude_dataset(
-        data["seizure_data"], data["non_seizure_data"],
-        max_samples_per_class, random_state
-    )
-    print(f"Samples: {int((y == 1).sum())} Anfall / {int((y == 0).sum())} kein Anfall "
-          f"(nach Subsampling auf max. {max_samples_per_class}/Klasse)")
+    if n_patients < 2:
+        print("Zu wenige Patienten fuer eine Kreuzvalidierung.")
+        return None
 
-    # 1 Feature pro Kanal (die Amplitude selbst)
-    ranking = rank_channels_by_js(X, y, n_channels, 1)
-    print("\nKanal-Ranking nach JS-Divergenz (Top 10):")
-    for ch, score in ranking[:10]:
-        print(f"  {channel_names[ch]:<12s}: {score:.4f} bits")
+    # Fold-Strategie bestimmen
+    if eval_mode == "auto":
+        eval_mode = "lopo" if n_patients <= AUTO_LOPO_MAX_PATIENTS else "kfold"
+    if eval_mode == "lopo":
+        n_splits = n_patients
+        print(f"Validierung: Leave-One-Patient-Out ({n_patients} Patienten "
+              f"=> {n_patients} Folds)")
+    else:
+        n_splits = min(n_folds, n_patients)
+        print(f"Validierung: gruppiertes {n_splits}-Fold ueber "
+              f"{n_patients} Patienten")
 
+    folds = _make_patient_folds(n_patients, n_splits)
     k = min(top_k_channels, n_channels)
-    top_channels = [ch for ch, _ in ranking[:k]]
-    print(f"\nVerwende Top-{k} Kanaele: "
-          f"{[channel_names[ch] for ch in top_channels]}")
-    Xsel = select_channel_features(X, top_channels, 1)
 
-    Xtr, Xte, ytr, yte = train_test_split(
-        Xsel, y, test_size=test_size, stratify=y, random_state=random_state
-    )
+    fold_rows = []
+    channel_selection_count = np.zeros(n_channels, dtype=int)
 
-    clf = GMMClassifier().fit(Xtr, ytr)
-    m = evaluate(clf.decision_function(Xte), yte)
-    print("\nGMM-Klassifikator (Likelihood-Ratio):")
-    print(f"  AUC={m['auc']:.3f}  Schwelle={m['best_threshold']:.3f}  "
-          f"TPR={m['tpr_at_best']:.2f}  FPR={m['fpr_at_best']:.2f}")
+    for fi, test_idx in enumerate(folds):
+        test_set = set(test_idx.tolist())
+        train_patients = [p for j, p in enumerate(patients) if j not in test_set]
+        test_patients = [patients[j] for j in test_idx]
 
-    det = GMMAnomalyDetector().fit(Xtr, ytr)
-    ma = evaluate(det.score_samples(Xte), yte)
-    print("\nGMM-Anomalie-Detektor (nur interiktal gefittet):")
-    print(f"  AUC={ma['auc']:.3f}")
+        Xtr = np.vstack([p["X"] for p in train_patients])
+        ytr = np.concatenate([p["y"] for p in train_patients])
+        Xte = np.vstack([p["X"] for p in test_patients])
+        yte = np.concatenate([p["y"] for p in test_patients])
 
-    return {"ranking": ranking, "channel_names": channel_names,
-            "classifier": m, "anomaly": ma}
-
-
-def run_on_pkl(pkl_path, **kwargs):
-    """Laedt eine eeg_results_{typ}.pkl und ruft die PKL-Pipeline auf."""
-    print(f"Lade EEG-Daten aus: {pkl_path}")
-    with open(pkl_path, "rb") as f:
-        data = pickle.load(f)
-    for key in ("channel_names", "seizure_data", "non_seizure_data"):
-        if key not in data:
-            raise KeyError(f"pkl fehlt der Schluessel '{key}'. Vorhanden: "
-                           f"{list(data.keys())}")
-    print("Erfolgreich geladen.")
-    return run_on_data_dict(data, **kwargs)
-
-
-# ===========================================================================
-# EDF-Pipeline (optional, staerker) -- Fenster-Features aus den Roh-EDFs
-# ===========================================================================
-def _bandpowers(window, sampling_rate):
-    """Relative Bandpower je Frequenzband via Welch-PSD."""
-    nperseg = int(min(len(window), max(32, sampling_rate)))
-    freqs, psd = sp_signal.welch(window, fs=sampling_rate, nperseg=nperseg)
-    total = _trapz(psd, freqs)
-    if total <= 0:
-        return np.zeros(len(FREQ_BANDS))
-    powers = []
-    for low, high in FREQ_BANDS.values():
-        mask = (freqs >= low) & (freqs < high)
-        band = _trapz(psd[mask], freqs[mask]) if mask.any() else 0.0
-        powers.append(band / total)
-    return np.array(powers)
-
-
-def _window_features(window, sampling_rate):
-    """Feature-Vektor fuer ein einzelnes Fenster eines Kanals."""
-    band = _bandpowers(window, sampling_rate)
-    line_length = np.sum(np.abs(np.diff(window)))
-    variance = np.var(window)
-    rms = np.sqrt(np.mean(window ** 2))
-    return np.concatenate([band, [line_length, variance, rms]])
-
-
-def extract_window_features(signal_data, sampling_rate, seizure_mask,
-                            window_sec=2.0, overlap=0.5):
-    """Zerlegt ein Mehrkanal-Signal in ueberlappende Fenster und extrahiert Features."""
-    n_channels, n_samples = signal_data.shape
-    win = int(round(window_sec * sampling_rate))
-    if win < 2 or n_samples < win:
-        return np.empty((0, 0)), np.empty((0,), dtype=int)
-
-    step = max(1, int(round(win * (1.0 - overlap))))
-    starts = range(0, n_samples - win + 1, step)
-
-    X, y = [], []
-    for s in starts:
-        e = s + win
-        feats = [
-            _window_features(signal_data[ch, s:e], sampling_rate)
-            for ch in range(n_channels)
-        ]
-        X.append(np.concatenate(feats))
-        y.append(int(seizure_mask[s:e].mean() >= 0.5))
-
-    return np.asarray(X), np.asarray(y, dtype=int)
-
-
-def build_feature_dataset(seizure_dict, data_folder, window_sec=2.0,
-                          overlap=0.5, verbose=True):
-    """Baut ein Fenster-Feature-Dataset ueber alle Patienten eines Anfallstyps.
-
-    Liest die EDFs analog zu Verteilungsfkt.analyze_eeg_distributions_from_files
-    und uebernimmt die ECHTEN Kanalnamen aus der EDF (raw.ch_names).
-    """
-    import mne  # lokaler Import: nur im EDF-Modus noetig
-
-    all_X, all_y = [], []
-    channel_names = None
-
-    for i, (patient, sz_start_end) in enumerate(seizure_dict.items()):
-        file_path = os.path.join(
-            data_folder, f"{patient}_res.OWN11101_filtWB_avg.edf"
-        )
-        try:
-            raw = mne.io.read_raw_edf(file_path, preload=False, verbose=False)
-            sampling_rate = raw.info["sfreq"]
-            sig = raw.get_data()
-            n_channels, n_samples = sig.shape
-
-            if channel_names is None:
-                channel_names = list(raw.ch_names)  # echte Kanalnamen
-
-            seizure_mask = np.zeros(n_samples, dtype=bool)
-            for start_time, end_time in sz_start_end:
-                a = int(max(0, start_time * sampling_rate))
-                b = int(min(n_samples, end_time * sampling_rate))
-                if a < b:
-                    seizure_mask[a:b] = True
-
-            X, y = extract_window_features(
-                sig, sampling_rate, seizure_mask, window_sec, overlap
-            )
-            if X.size:
-                all_X.append(X)
-                all_y.append(y)
-
-            if verbose:
-                print(f"  Patient {i+1}: {patient} -> {len(y)} Fenster "
-                      f"({int(y.sum())} Anfall)")
-
-            del sig, raw
-        except Exception as e:  # noqa: BLE001 - Robustheit wie im Bestandscode
-            print(f"Fehler bei Patient {patient}: {e}")
+        n_test_sz = int((yte == 1).sum())
+        # AUC braucht beide Klassen im Test und im Training
+        if n_test_sz == 0 or (yte == 0).sum() == 0:
+            print(f"  Fold {fi+1}: uebersprungen (Test hat {n_test_sz} "
+                  f"Anfalls-Fenster) - AUC nicht definiert.")
+            continue
+        if (ytr == 1).sum() == 0 or (ytr == 0).sum() == 0:
+            print(f"  Fold {fi+1}: uebersprungen (Training einklassig).")
             continue
 
-    if not all_X:
-        return np.empty((0, 0)), np.empty((0,), dtype=int), ([], FEATURE_NAMES)
+        # Ruhe-Klasse im Training begrenzen (Rechenzeit bei vielen Patienten)
+        Xtr, ytr = _subsample_negatives(Xtr, ytr, max_neg_per_fold, rng)
 
-    X = np.vstack(all_X)
-    y = np.concatenate(all_y)
-    return X, y, (channel_names, FEATURE_NAMES)
+        # Kanalauswahl NUR auf Trainingsdaten (leckfrei)
+        ranking = rank_channels_by_js(Xtr, ytr, n_channels, n_feat)
+        top = [ch for ch, _ in ranking[:k]]
+        for ch in top:
+            channel_selection_count[ch] += 1
+
+        Xtr_sel = select_channel_features(Xtr, top, n_feat)
+        Xte_sel = select_channel_features(Xte, top, n_feat)
+
+        clf = GMMClassifier().fit(Xtr_sel, ytr)
+        auc_clf = roc_auc_score(yte, clf.decision_function(Xte_sel))
+
+        det = GMMAnomalyDetector().fit(Xtr_sel, ytr)
+        auc_det = roc_auc_score(yte, det.score_samples(Xte_sel))
+
+        label = (test_patients[0]["patient"] if len(test_patients) == 1
+                 else f"{len(test_patients)} Patienten")
+        print(f"  Fold {fi+1:>2d} [{label}]: "
+              f"AUC(clf)={auc_clf:.3f}  AUC(anom)={auc_det:.3f}  "
+              f"(Test: {n_test_sz} Anfalls-Fenster)")
+        fold_rows.append({"fold": fi + 1, "auc_clf": auc_clf,
+                          "auc_anom": auc_det, "n_test_sz": n_test_sz})
+
+    if not fold_rows:
+        print("Keine auswertbaren Folds.")
+        return None
+
+    auc_clf = np.array([r["auc_clf"] for r in fold_rows])
+    auc_anom = np.array([r["auc_anom"] for r in fold_rows])
+    print("\n" + "-" * 60)
+    print(f"Ergebnis ueber {len(fold_rows)} Folds:")
+    print(f"  GMM-Klassifikator : AUC = {auc_clf.mean():.3f} "
+          f"+/- {auc_clf.std():.3f}")
+    print(f"  Anomalie-Detektor : AUC = {auc_anom.mean():.3f} "
+          f"+/- {auc_anom.std():.3f}")
+
+    # Welche Kanaele wurden ueber die Folds am haeufigsten ausgewaehlt?
+    order = np.argsort(channel_selection_count)[::-1]
+    print(f"\nAm haeufigsten gewaehlte Kanaele (Top {min(k, 10)}):")
+    for ch in order[:min(k, 10)]:
+        if channel_selection_count[ch] == 0:
+            break
+        name = channel_names[ch] if ch < len(channel_names) else f"Ch_{ch}"
+        print(f"  {name:<12s}: in {channel_selection_count[ch]}/"
+              f"{len(fold_rows)} Folds")
+
+    return {"folds": fold_rows,
+            "auc_clf_mean": float(auc_clf.mean()),
+            "auc_clf_std": float(auc_clf.std()),
+            "auc_anom_mean": float(auc_anom.mean()),
+            "auc_anom_std": float(auc_anom.std()),
+            "channel_selection_count": channel_selection_count.tolist()}
 
 
 def run_on_edf(seizure_type, base_path, window_sec=2.0, overlap=0.5,
-               top_k_channels=10, test_size=0.3, random_state=42):
-    """EDF-Fenster-Feature-Pipeline auf den Roh-EDFs + *_seizures.csv."""
-    from sklearn.model_selection import train_test_split
-
+               top_k_channels=10, eval_mode="auto", n_folds=5,
+               max_neg_per_fold=40000, random_state=42):
+    """EDF-Pipeline: patientenweise einlesen + patientenweise Kreuzvalidierung."""
     from Verteilungsfkt import get_sz_start_end
 
     st = seizure_type.upper()
@@ -480,64 +490,97 @@ def run_on_edf(seizure_type, base_path, window_sec=2.0, overlap=0.5,
     print(f"Lade Anfallszeiten aus {csv_file} ...")
     seizure_dict = get_sz_start_end(csv_file)
 
-    print("Extrahiere Fenster-Features aus den EDFs ...")
-    X, y, meta = build_feature_dataset(seizure_dict, data_folder,
-                                       window_sec, overlap)
-    if X.size == 0:
+    print("Lese EDFs patientenweise und extrahiere Fenster-Features ...")
+    patients, channel_names = build_patient_datasets(
+        seizure_dict, data_folder, window_sec, overlap
+    )
+    if not patients:
         print("Keine Daten extrahiert - Abbruch.")
         return None
 
-    channel_names, feat_names = meta
-    n_channels = len(channel_names)
-    n_feat = len(feat_names)
-    print(f"\nDataset: {X.shape[0]} Fenster, {n_channels} Kanaele, "
-          f"{n_feat} Features/Kanal, {int(y.sum())} Anfallsfenster")
+    total_windows = sum(len(p["y"]) for p in patients)
+    total_sz = sum(int(p["y"].sum()) for p in patients)
+    print(f"\n{len(patients)} Patienten, {total_windows} Fenster gesamt, "
+          f"{total_sz} Anfalls-Fenster, {len(channel_names)} Kanaele\n")
 
-    ranking = rank_channels_by_js(X, y, n_channels, n_feat)
+    return cross_validate_patients(
+        patients, channel_names, top_k_channels=top_k_channels,
+        eval_mode=eval_mode, n_folds=n_folds,
+        max_neg_per_fold=max_neg_per_fold, random_state=random_state,
+    )
+
+
+# ===========================================================================
+# 5. PKL-Modus (nur grobe Orientierung -- KEINE leckfreie Validierung!)
+# ===========================================================================
+def _stack_channels(per_channel):
+    """Bringt seizure_data/non_seizure_data auf (n_channels, n_samples)."""
+    if isinstance(per_channel, np.ndarray) and per_channel.ndim == 2:
+        return per_channel
+    arrs = [np.asarray(a).ravel() for a in per_channel]
+    m = min(len(a) for a in arrs)
+    return np.vstack([a[:m] for a in arrs])
+
+
+def run_on_pkl(pkl_path, top_k_channels=10, max_samples_per_class=50000,
+               test_size=0.3, random_state=42):
+    """Grobe Orientierung auf den gepoolten pkl-Amplituden.
+
+    ACHTUNG: Die pkl kennt keine Patienten -> der Split erfolgt ueber Samples,
+    das ist NICHT leckfrei und die AUC ist optimistisch verzerrt. Nur zur
+    schnellen Sichtung, nicht fuer finale Ergebnisse verwenden.
+    """
+    from sklearn.metrics import roc_auc_score
+    from sklearn.model_selection import train_test_split
+
+    print("!" * 64)
+    print("WARNUNG: PKL-Modus splittet ueber Samples (keine Patiententrennung).")
+    print("Die AUC ist dadurch optimistisch verzerrt. Fuer belastbare")
+    print("Ergebnisse den EDF-Modus mit patientenweiser CV verwenden.")
+    print("!" * 64)
+
+    print(f"\nLade EEG-Daten aus: {pkl_path}")
+    with open(pkl_path, "rb") as f:
+        data = pickle.load(f)
+    channel_names = list(data["channel_names"])
+    n_channels = len(channel_names)
+
+    sz = _stack_channels(data["seizure_data"]).T        # (n_iktal, C)
+    ns = _stack_channels(data["non_seizure_data"]).T    # (n_interiktal, C)
+    rng = np.random.default_rng(random_state)
+    if len(sz) > max_samples_per_class:
+        sz = sz[rng.choice(len(sz), max_samples_per_class, replace=False)]
+    if len(ns) > max_samples_per_class:
+        ns = ns[rng.choice(len(ns), max_samples_per_class, replace=False)]
+
+    X = np.vstack([sz, ns])
+    y = np.concatenate([np.ones(len(sz), int), np.zeros(len(ns), int)])
+    print(f"Kanaele: {n_channels}, Samples: {len(sz)} Anfall / {len(ns)} Ruhe")
+
+    ranking = rank_channels_by_js(X, y, n_channels, 1)
     print("\nKanal-Ranking nach JS-Divergenz (Top 10):")
     for ch, score in ranking[:10]:
         print(f"  {channel_names[ch]:<12s}: {score:.4f} bits")
 
     k = min(top_k_channels, n_channels)
-    top_channels = [ch for ch, _ in ranking[:k]]
-    Xsel = select_channel_features(X, top_channels, n_feat)
-
+    top = [ch for ch, _ in ranking[:k]]
+    Xsel = select_channel_features(X, top, 1)
     Xtr, Xte, ytr, yte = train_test_split(
         Xsel, y, test_size=test_size, stratify=y, random_state=random_state
     )
     clf = GMMClassifier().fit(Xtr, ytr)
-    m = evaluate(clf.decision_function(Xte), yte)
-    print("\nGMM-Klassifikator (Fenster-Features):")
-    print(f"  AUC={m['auc']:.3f}  Schwelle={m['best_threshold']:.3f}  "
-          f"TPR={m['tpr_at_best']:.2f}  FPR={m['fpr_at_best']:.2f}")
-    return {"ranking": ranking, "channel_names": channel_names, "classifier": m}
+    auc = roc_auc_score(yte, clf.decision_function(Xte))
+    print(f"\nGMM-Klassifikator (verzerrt!): AUC={auc:.3f}")
+    return {"auc_biased": float(auc), "ranking": ranking}
 
 
 # ===========================================================================
-# Selbsttest (synthetisch, ohne echte Daten) -- prueft beide Pfade
+# 6. Selbsttest (synthetisch, ohne echte Daten)
 # ===========================================================================
-def _make_synthetic_pkl(n_channels=27, n_samples=40000, rng=None):
-    """Erzeugt ein dict im pkl-Format. Einige Kanaele trennen Anfall/Nicht-Anfall
-    (verschobene Amplituden-Verteilung), die uebrigen sind uninformativ."""
-    rng = rng or np.random.default_rng(0)
-    channel_names = [f"EEG-{k+1:02d}" for k in range(n_channels)]
-    informative = set(range(0, n_channels, 5))  # jeder 5. Kanal traegt Signal
-    sz, ns = [], []
-    for ch in range(n_channels):
-        if ch in informative:
-            sz.append(rng.normal(0.4, 1.3, n_samples))   # anders verteilt
-            ns.append(rng.normal(0.0, 1.0, n_samples))
-        else:
-            sz.append(rng.normal(0.0, 1.0, n_samples))   # kein Unterschied
-            ns.append(rng.normal(0.0, 1.0, n_samples))
-    return {"channel_names": channel_names,
-            "seizure_data": sz, "non_seizure_data": ns}
-
-
-def _make_synthetic_eeg(n_channels=6, sampling_rate=256.0, seconds=200,
-                        seizure_fraction=0.2, rng=None):
-    """Mehrkanal-Signal mit staerkerer 25-Hz-Rhythmik in den Anfallsabschnitten."""
-    rng = rng or np.random.default_rng(0)
+def _make_synthetic_patient(seed, n_channels=6, sampling_rate=256.0,
+                            seconds=120, seizure_fraction=0.25):
+    """Ein synthetischer Patient: Anfallsabschnitt mit staerkerer 25-Hz-Rhythmik."""
+    rng = np.random.default_rng(seed)
     n = int(seconds * sampling_rate)
     t = np.arange(n) / sampling_rate
     mask = np.zeros(n, dtype=bool)
@@ -545,43 +588,37 @@ def _make_synthetic_eeg(n_channels=6, sampling_rate=256.0, seconds=200,
     end = int(n * (0.5 + seizure_fraction / 2))
     mask[start:end] = True
     sig = rng.standard_normal((n_channels, n)) * 0.5
-    sig += 0.8 * np.sin(2 * np.pi * 10 * t)
+    sig += 0.8 * np.sin(2 * np.pi * 10 * t)              # alpha-Grundrhythmus
+    # patientenabhaengige Anfallsstaerke -> realistische Fold-Streuung
+    amp = 1.0 + 0.6 * rng.standard_normal()
     burst = np.zeros(n)
     burst[mask] = 1.0
-    sig += 1.5 * burst * np.sin(2 * np.pi * 25 * t)
+    sig += abs(amp) * burst * np.sin(2 * np.pi * 25 * t)
     return sig, mask, sampling_rate
 
 
 def run_selftest():
     print("=" * 64)
-    print("SELBSTTEST 1/2: PKL-Modus (synthetisch, dein echtes Datenformat)")
+    print("SELBSTTEST: EDF-Fenster-Features + patientenweise Kreuzvalidierung")
     print("=" * 64)
-    data = _make_synthetic_pkl(rng=np.random.default_rng(1))
-    run_on_data_dict(data, top_k_channels=6, max_samples_per_class=8000)
+    patients = []
+    for pid in range(6):  # 6 synthetische Patienten
+        sig, mask, sr = _make_synthetic_patient(seed=pid)
+        X, y = extract_window_features(sig, sr, mask, window_sec=2.0, overlap=0.5)
+        patients.append({"patient": f"synt_{pid:02d}", "X": X, "y": y})
+    channel_names = [f"EEG-{k+1}" for k in range(6)]
+    print(f"{len(patients)} Patienten je "
+          f"{len(patients[0]['y'])} Fenster.\n")
 
-    print("\n" + "=" * 64)
-    print("SELBSTTEST 2/2: EDF-Fenster-Feature-Modus (synthetisch)")
-    print("=" * 64)
-    rng = np.random.default_rng(42)
-    sig, mask, sr = _make_synthetic_eeg(rng=rng)
-    X, y = extract_window_features(sig, sr, mask, window_sec=2.0, overlap=0.5)
-    n_channels, n_feat = sig.shape[0], len(FEATURE_NAMES)
-    print(f"Fenster: {X.shape[0]}, Features/Fenster: {X.shape[1]}")
-    ranking = rank_channels_by_js(X, y, n_channels, n_feat)
-    top = [ch for ch, _ in ranking[:3]]
-    Xsel = select_channel_features(X, top, n_feat)
-    idx = rng.permutation(len(y))
-    cut = int(0.7 * len(y))
-    tr, te = idx[:cut], idx[cut:]
-    clf = GMMClassifier().fit(Xsel[tr], y[tr])
-    m = evaluate(clf.decision_function(Xsel[te]), y[te])
-    print(f"GMM-Klassifikator: AUC={m['auc']:.3f}")
+    # bei 6 Patienten waehlt auto -> LOPO
+    cross_validate_patients(patients, channel_names, top_k_channels=3,
+                            eval_mode="auto")
 
-    print("\n[OK] Beide Pipelines laufen durch.")
+    print("\n[OK] Patientenweise CV laeuft durch.")
 
 
 # ===========================================================================
-# CLI
+# 7. CLI
 # ===========================================================================
 def main():
     parser = argparse.ArgumentParser(
@@ -590,55 +627,53 @@ def main():
     )
     parser.add_argument("--selftest", action="store_true",
                         help="Synthetischer Selbsttest ohne echte Daten.")
-    parser.add_argument("--source", choices=["auto", "pkl", "edf"],
-                        default="auto",
-                        help="Datenquelle. auto: pkl bevorzugen, sonst edf.")
+    parser.add_argument("--source", choices=["edf", "pkl"], default="edf",
+                        help="edf: empfohlen (patientenweise CV). "
+                             "pkl: nur grobe, verzerrte Orientierung.")
     parser.add_argument("--seizure-type", default=None,
-                        help="z.B. cpsz, fnsz, gnsz, absz")
+                        help="z.B. absz, cpsz, fnsz, gnsz")
     parser.add_argument("--base", default="/home/data/ninalaemmermann/forschung",
                         help="Basis-Pfad der Forschungsdaten.")
     parser.add_argument("--pkl", default=None,
                         help="Direkter Pfad zu einer eeg_results_*.pkl "
-                             "(ueberschreibt --base/--seizure-type).")
+                             "(nur --source pkl).")
+    parser.add_argument("--eval", choices=["auto", "lopo", "kfold"],
+                        default="auto",
+                        help="Validierungsstrategie (EDF). auto: <=25 Patienten "
+                             "=> LOPO, sonst k-Fold.")
+    parser.add_argument("--folds", type=int, default=5,
+                        help="Anzahl Folds fuer --eval kfold.")
     parser.add_argument("--top-k", type=int, default=10,
                         help="Anzahl der besten Kanaele fuers GMM.")
-    parser.add_argument("--max-samples", type=int, default=50000,
-                        help="Max. Samples pro Klasse (PKL-Modus, Subsampling).")
     parser.add_argument("--window-sec", type=float, default=2.0,
-                        help="Fensterlaenge in Sekunden (EDF-Modus).")
+                        help="Fensterlaenge in Sekunden (z.B. 5.0).")
     parser.add_argument("--overlap", type=float, default=0.5,
-                        help="Fenster-Ueberlappung 0..1 (EDF-Modus).")
+                        help="Fenster-Ueberlappung 0..1.")
+    parser.add_argument("--max-neg-per-fold", type=int, default=40000,
+                        help="Max. Ruhe-Fenster im Training pro Fold "
+                             "(Rechenzeit bei vielen Patienten).")
     args = parser.parse_args()
 
     if args.selftest:
         run_selftest()
         return
 
-    # Quelle bestimmen
-    pkl_path = args.pkl
-    if pkl_path is None and args.seizure_type is not None:
-        pkl_path = os.path.join(
-            args.base, f"eeg_results_{args.seizure_type.lower()}.pkl"
-        )
+    if args.source == "pkl":
+        pkl_path = args.pkl
+        if pkl_path is None and args.seizure_type is not None:
+            pkl_path = os.path.join(
+                args.base, f"eeg_results_{args.seizure_type.lower()}.pkl"
+            )
+        if not pkl_path or not os.path.exists(pkl_path):
+            parser.error(f"pkl nicht gefunden: {pkl_path}")
+        run_on_pkl(pkl_path, top_k_channels=args.top_k)
+        return
 
-    use_edf = args.source == "edf"
-    if args.source == "auto":
-        use_edf = not (pkl_path and os.path.exists(pkl_path))
-
-    if not use_edf:
-        if not pkl_path:
-            parser.error("Bitte --seizure-type oder --pkl angeben "
-                         "(oder --selftest).")
-        if not os.path.exists(pkl_path):
-            parser.error(f"pkl nicht gefunden: {pkl_path}\n"
-                         f"Alternativ --source edf verwenden.")
-        run_on_pkl(pkl_path, top_k_channels=args.top_k,
-                   max_samples_per_class=args.max_samples)
-    else:
-        if args.seizure_type is None:
-            parser.error("EDF-Modus braucht --seizure-type.")
-        run_on_edf(args.seizure_type, args.base, args.window_sec,
-                   args.overlap, args.top_k)
+    # EDF-Modus (empfohlen)
+    if args.seizure_type is None:
+        parser.error("Bitte --seizure-type angeben (oder --selftest).")
+    run_on_edf(args.seizure_type, args.base, args.window_sec, args.overlap,
+               args.top_k, args.eval, args.folds, args.max_neg_per_fold)
 
 
 if __name__ == "__main__":
