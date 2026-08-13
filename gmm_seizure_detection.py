@@ -34,19 +34,23 @@ Annotationen.
 
 Nutzung
 -------
-    # ABSZ (wenige Dateien) -> automatisch Leave-One-Patient-Out
-    python gmm_seizure_detection.py --seizure-type absz
+    # GNSZ (Default) -> 63 Subjekte, also automatisch gruppiertes 5-Fold
+    python gmm_seizure_detection.py
 
-    # die grossen Typen (~200 Dateien) -> automatisch 5-Fold (oder explizit)
+    # andere Anfallstypen (absz ist mit 10 Subjekten der kleinste)
+    python gmm_seizure_detection.py --seizure-type absz --window-sec 2
     python gmm_seizure_detection.py --seizure-type cpsz --eval kfold --folds 5
 
     # laengeres Fenster / mehr Kanaele
-    python gmm_seizure_detection.py --seizure-type absz --window-sec 5 --top-k 15
+    python gmm_seizure_detection.py --window-sec 10 --top-k 15
 
     # Feature-Gruppen vergleichen (welche Merkmale trennen am besten?)
-    python gmm_seizure_detection.py --seizure-type absz --features all
-    python gmm_seizure_detection.py --seizure-type absz --features bandpower
-    python gmm_seizure_detection.py --seizure-type absz --features linelength
+    python gmm_seizure_detection.py --features all
+    python gmm_seizure_detection.py --features bandpower
+    python gmm_seizure_detection.py --features linelength
+
+    # Mischfenster an den Anfallsraendern aus dem Training werfen
+    python gmm_seizure_detection.py --label-purity 1.0
 
     # Selbsttest ohne echte Daten (synthetisch):
     python gmm_seizure_detection.py --selftest
@@ -119,17 +123,27 @@ def extract_window_features(signal_data, sampling_rate, seizure_mask,
                             window_sec=2.0, overlap=0.5):
     """Zerlegt ein Mehrkanal-Signal in ueberlappende Fenster und extrahiert Features.
 
-    Returns X (n_windows, n_channels*n_features) und y (n_windows,), y=1 => Anfall.
+    Returns
+    -------
+    X    : (n_windows, n_channels*n_features)
+    y    : (n_windows,), y=1 => Anfall (Mehrheitsregel, siehe unten)
+    frac : (n_windows,), iktaler Anteil je Fenster in 0..1
+
+    frac wird mitgefuehrt, damit sich die Mischfenster an den Anfallsraendern
+    spaeter identifizieren und gezielt aus dem Training werfen lassen (siehe
+    filter_by_purity). y selbst bleibt die klassische Mehrheitsregel -- so wie
+    ein realer Detektor jedes Fenster bewerten muesste.
     """
     n_channels, n_samples = signal_data.shape
     win = int(round(window_sec * sampling_rate))
     if win < 2 or n_samples < win:
-        return np.empty((0, 0)), np.empty((0,), dtype=int)
+        return (np.empty((0, 0)), np.empty((0,), dtype=int),
+                np.empty((0,), dtype=float))
 
     step = max(1, int(round(win * (1.0 - overlap))))
     starts = range(0, n_samples - win + 1, step)
 
-    X, y = [], []
+    X, y, frac = [], [], []
     for s in starts:
         e = s + win
         feats = [
@@ -138,9 +152,37 @@ def extract_window_features(signal_data, sampling_rate, seizure_mask,
         ]
         X.append(np.concatenate(feats))
         # Fenster gilt als Anfall, wenn die Mehrheit der Samples iktal ist
-        y.append(int(seizure_mask[s:e].mean() >= 0.5))
+        f = float(seizure_mask[s:e].mean())
+        frac.append(f)
+        y.append(int(f >= 0.5))
 
-    return np.asarray(X), np.asarray(y, dtype=int)
+    return (np.asarray(X), np.asarray(y, dtype=int),
+            np.asarray(frac, dtype=float))
+
+
+def filter_by_purity(X, y, frac, purity):
+    """Guard-Band: wirft die Mischfenster an den Anfallsraendern raus.
+
+    Ein Fenster gilt als sicher iktal, wenn sein Anfallsanteil >= purity ist,
+    und als sicher interiktal, wenn er <= 1-purity ist. Alles dazwischen ist
+    mehrdeutig und wird verworfen.
+
+    purity=0.5 ergibt exakt die klassische Mehrheitsregel (die Schwellen fallen
+    zusammen, es wird nichts verworfen). purity=1.0 behaelt nur Fenster, die
+    vollstaendig iktal bzw. vollstaendig interiktal sind.
+
+    Bei 50% Ueberlappung entstehen pro Anfall immer genau 4 Mischfenster --
+    unabhaengig von Anfallsdauer und Fensterlaenge. Bei kurzen Anfaellen (ABSZ)
+    ist das ein erheblicher Anteil der positiven Klasse, bei langen (CPSZ, GNSZ)
+    faellt es kaum ins Gewicht.
+
+    Returns X_f, y_f, n_dropped.
+    """
+    if purity <= 0.5 or len(y) == 0:
+        return X, y, 0
+    keep = (frac >= purity) | (frac <= 1.0 - purity)
+    y_clean = (frac >= purity).astype(int)
+    return X[keep], y_clean[keep], int((~keep).sum())
 
 
 def build_patient_datasets(seizure_dict, data_folder, window_sec=2.0,
@@ -159,11 +201,10 @@ def build_patient_datasets(seizure_dict, data_folder, window_sec=2.0,
 
     Returns
     -------
-    patients : Liste von dicts {'patient', 'X', 'y', 'n_ch'}
+    patients : Liste von dicts {'patient', 'X', 'y', 'frac', 'n_ch'}
     channel_names : Liste der (gemeinsamen) Kanalnamen
     """
-    import mne  # lokaler Import: nur im EDF-Modus noetig
-
+    import mne  
     n_feat_full = len(FEATURE_NAMES)
     patients = []
     first_ch_names = None
@@ -183,17 +224,24 @@ def build_patient_datasets(seizure_dict, data_folder, window_sec=2.0,
 
             seizure_mask = np.zeros(n_samples, dtype=bool)
             for start_time, end_time in sz_start_end:
+                # NaN-Schutz: max(0, nan) ist 0 und min(n, nan) ist n, ein
+                # fehlender Zeitstempel wuerde also die GESAMTE Aufnahme als
+                # Anfall markieren, ohne dass irgendwo etwas auffaellt.
+                if not (np.isfinite(start_time) and np.isfinite(end_time)):
+                    print(f"  WARNUNG {patient}: Anfallszeit unvollstaendig "
+                          f"({start_time}, {end_time}) - uebersprungen.")
+                    continue
                 a = int(max(0, start_time * sampling_rate))
                 b = int(min(n_samples, end_time * sampling_rate))
                 if a < b:
                     seizure_mask[a:b] = True
 
-            X, y = extract_window_features(
+            X, y, frac = extract_window_features(
                 sig, sampling_rate, seizure_mask, window_sec, overlap
             )
             if X.size:
                 patients.append({"patient": patient, "X": X, "y": y,
-                                 "n_ch": n_channels})
+                                 "frac": frac, "n_ch": n_channels})
 
             if verbose:
                 n_sz = int(y.sum()) if X.size else 0
@@ -375,17 +423,37 @@ class GMMAnomalyDetector:
 # ===========================================================================
 # 4. Patientenweise Kreuzvalidierung (LOPO oder gruppiertes k-Fold)
 # ===========================================================================
-def _make_patient_folds(n_patients, n_splits):
-    """Teilt Patienten-Indizes deterministisch in n_splits Gruppen (Round-Robin).
+def subject_of(recording_name):
+    """Subjekt-Kennung aus dem TUH-Dateinamen <subject>_s<session>_t<token>.
 
-    n_splits == n_patients ergibt LOPO (jede Gruppe genau ein Patient).
-    Returns Liste von Arrays mit Test-Patienten-Indizes je Fold.
+    Ein Subjekt hat oft mehrere Aufnahmen (Sessions/Segmente). Ohne diese
+    Zuordnung landen Aufnahmen derselben Person in Training UND Test -- das
+    Modell erkennt dann die Person wieder statt den Anfall, und die AUC ist
+    geschoent. Bei ABSZ sind es 17 Aufnahmen von nur 10 Personen, bei CPSZ
+    sogar 80 Aufnahmen von 15.
     """
-    n_splits = int(min(max(2, n_splits), n_patients))
-    folds = [[] for _ in range(n_splits)]
-    for idx in range(n_patients):
-        folds[idx % n_splits].append(idx)
-    return [np.array(f) for f in folds]
+    return recording_name.split("_")[0]
+
+
+def _make_group_folds(groups, n_splits):
+    """Teilt nach GRUPPEN (Subjekten) auf, nicht nach einzelnen Aufnahmen.
+
+    Alle Aufnahmen einer Gruppe landen zusammen in genau einem Fold. Round-Robin
+    ueber die sortierten Gruppen, damit das Ergebnis reproduzierbar bleibt.
+
+    n_splits == Anzahl Gruppen ergibt Leave-One-Subject-Out.
+    Returns Liste von Arrays mit Test-INDIZES (bezogen auf die Aufnahmeliste).
+    """
+    uniq = sorted(set(groups))
+    n_splits = int(min(max(2, n_splits), len(uniq)))
+    bins = [[] for _ in range(n_splits)]
+    for i, g in enumerate(uniq):
+        bins[i % n_splits].append(g)
+    folds = []
+    for b in bins:
+        members = set(b)
+        folds.append(np.array([i for i, g in enumerate(groups) if g in members]))
+    return folds
 
 
 def _subsample_negatives(X, y, max_neg, rng):
@@ -419,7 +487,9 @@ def reduce_to_feature_group(X, n_channels, feature_group,
 
 def cross_validate_patients(patients, channel_names, top_k_channels=10,
                             eval_mode="auto", n_folds=5, n_feat=len(FEATURE_NAMES),
-                            max_neg_per_fold=40000, random_state=42):
+                            max_neg_per_fold=40000, label_purity=0.5,
+                            group_by_subject=True, classifier_factory=None,
+                            random_state=42):
     """Patientenweise Kreuzvalidierung des GMM-Detektors.
 
     Pro Fold: Kanalauswahl (JS) NUR auf Trainingspatienten, GMMs auf Training
@@ -428,6 +498,26 @@ def cross_validate_patients(patients, channel_names, top_k_channels=10,
 
     n_feat = Anzahl Features pro Kanal (haengt von der gewaehlten Feature-Gruppe
     ab; die patients-X muessen bereits entsprechend reduziert sein).
+
+    label_purity > 0.5 verwirft die mehrdeutigen Mischfenster an den Anfalls-
+    raendern -- aber AUSSCHLIESSLICH im Training. Der Testsatz bleibt immer
+    vollstaendig und mehrheitsgelabelt, denn ein realer Detektor bekommt die
+    Randfenster ebenfalls vorgesetzt. Wuerde man sie auch im Test entfernen,
+    waere die AUC gegenueber dem echten Einsatz geschoent.
+
+    group_by_subject=True bildet die Folds nach Subjekt statt nach Datei. Das
+    ist der Normalfall: die TUH-Aufnahmen heissen <subject>_s<session>_t<token>,
+    und viele Subjekte haben mehrere Aufnahmen. Ohne Gruppierung liegen
+    Geschwister-Aufnahmen derselben Person im Training -- gemessen an ABSZ hebt
+    das die AUC um rund 0.06 an.
+
+    classifier_factory erlaubt es, ein anderes Modell einzuhaengen (z.B. das
+    Boosted Ensemble aus boosted_gmm.py oder die Histogramm-Baseline). Erwartet
+    wird eine Funktion ohne Argumente, die ein Objekt mit fit(X, y) und
+    decision_function(X) liefert -- also die Schnittstelle von GMMClassifier.
+    Default None heisst: GMMClassifier wie bisher. Alles andere (Folds,
+    Kanalauswahl, Reinheitsfilter) bleibt gleich, damit die Modelle wirklich
+    unter identischen Bedingungen verglichen werden.
     """
     from sklearn.metrics import roc_auc_score
 
@@ -439,22 +529,46 @@ def cross_validate_patients(patients, channel_names, top_k_channels=10,
         print("Zu wenige Patienten fuer eine Kreuzvalidierung.")
         return None
 
-    # Fold-Strategie bestimmen
-    if eval_mode == "auto":
-        eval_mode = "lopo" if n_patients <= AUTO_LOPO_MAX_PATIENTS else "kfold"
-    if eval_mode == "lopo":
-        n_splits = n_patients
-        print(f"Validierung: Leave-One-Patient-Out ({n_patients} Patienten "
-              f"=> {n_patients} Folds)")
+    # Gruppierung: mehrere Aufnahmen desselben Subjekts duerfen nicht auf
+    # Training und Test verteilt werden (sonst erkennt das Modell die Person).
+    if group_by_subject:
+        groups = [subject_of(p["patient"]) for p in patients]
+        unit = "Subjekte"
     else:
-        n_splits = min(n_folds, n_patients)
-        print(f"Validierung: gruppiertes {n_splits}-Fold ueber "
-              f"{n_patients} Patienten")
+        groups = [p["patient"] for p in patients]
+        unit = "Aufnahmen"
+    n_groups = len(set(groups))
+    if group_by_subject and n_groups < n_patients:
+        print(f"Gruppierung: {n_patients} Aufnahmen von {n_groups} Subjekten "
+              f"-- Folds werden nach Subjekt gebildet.")
 
-    folds = _make_patient_folds(n_patients, n_splits)
+    if n_groups < 2:
+        print("Zu wenige Gruppen fuer eine Kreuzvalidierung.")
+        return None
+
+    # Fold-Strategie bestimmen (richtet sich nach den GRUPPEN, nicht den Dateien)
+    if eval_mode == "auto":
+        eval_mode = "lopo" if n_groups <= AUTO_LOPO_MAX_PATIENTS else "kfold"
+    if eval_mode == "lopo":
+        n_splits = n_groups
+        print(f"Validierung: Leave-One-Out ueber {n_groups} {unit} "
+              f"=> {n_groups} Folds")
+    else:
+        n_splits = min(n_folds, n_groups)
+        print(f"Validierung: gruppiertes {n_splits}-Fold ueber "
+              f"{n_groups} {unit}")
+
+    folds = _make_group_folds(groups, n_splits)
     k = min(top_k_channels, n_channels)
 
+    if label_purity > 0.5:
+        print(f"Label-Reinheit: Training nur mit Anteil >= {label_purity:.2f} "
+              f"(Anfall) bzw. <= {1-label_purity:.2f} (Ruhe); Test bleibt "
+              f"vollstaendig.")
+
     fold_rows = []
+    per_patient = []
+    total_dropped = 0
     channel_selection_count = np.zeros(n_channels, dtype=int)
 
     for fi, test_idx in enumerate(folds):
@@ -464,6 +578,8 @@ def cross_validate_patients(patients, channel_names, top_k_channels=10,
 
         Xtr = np.vstack([p["X"] for p in train_patients])
         ytr = np.concatenate([p["y"] for p in train_patients])
+        ftr = np.concatenate([p["frac"] for p in train_patients])
+        # Test bleibt bewusst ungefiltert (Mehrheitsregel) -> realistische AUC
         Xte = np.vstack([p["X"] for p in test_patients])
         yte = np.concatenate([p["y"] for p in test_patients])
 
@@ -473,6 +589,11 @@ def cross_validate_patients(patients, channel_names, top_k_channels=10,
             print(f"  Fold {fi+1}: uebersprungen (Test hat {n_test_sz} "
                   f"Anfalls-Fenster) - AUC nicht definiert.")
             continue
+
+        # Mehrdeutige Randfenster nur aus dem Training werfen
+        Xtr, ytr, n_dropped = filter_by_purity(Xtr, ytr, ftr, label_purity)
+        total_dropped += n_dropped
+
         if (ytr == 1).sum() == 0 or (ytr == 0).sum() == 0:
             print(f"  Fold {fi+1}: uebersprungen (Training einklassig).")
             continue
@@ -489,18 +610,46 @@ def cross_validate_patients(patients, channel_names, top_k_channels=10,
         Xtr_sel = select_channel_features(Xtr, top, n_feat)
         Xte_sel = select_channel_features(Xte, top, n_feat)
 
-        clf = GMMClassifier().fit(Xtr_sel, ytr)
-        auc_clf = roc_auc_score(yte, clf.decision_function(Xte_sel))
+        clf = (classifier_factory() if classifier_factory else GMMClassifier())
+        clf.fit(Xtr_sel, ytr)
+        s_clf = clf.decision_function(Xte_sel)
+        auc_clf = roc_auc_score(yte, s_clf)
 
         det = GMMAnomalyDetector().fit(Xtr_sel, ytr)
-        auc_det = roc_auc_score(yte, det.score_samples(Xte_sel))
+        s_anom = det.score_samples(Xte_sel)
+        auc_det = roc_auc_score(yte, s_anom)
 
-        label = (test_patients[0]["patient"] if len(test_patients) == 1
-                 else f"{len(test_patients)} Patienten")
+        # Scores je Testpatient sichern -- Grundlage fuer alle Auswertungsplots.
+        # Xte ist ueber die Testpatienten gestapelt, also der Reihe nach zurueck-
+        # schneiden. Ohne das waeren die Scores nach dem Fold verloren.
+        offset = 0
+        for p in test_patients:
+            n = len(p["y"])
+            yp = p["y"]
+            both = yp.min() != yp.max()
+            per_patient.append({
+                "patient": p["patient"], "fold": fi + 1,
+                "y": yp, "frac": p["frac"],
+                "score_clf": s_clf[offset:offset + n],
+                "score_anom": s_anom[offset:offset + n],
+                "auc_clf": (float(roc_auc_score(yp, s_clf[offset:offset + n]))
+                            if both else None),
+                "auc_anom": (float(roc_auc_score(yp, s_anom[offset:offset + n]))
+                             if both else None),
+            })
+            offset += n
+
+        test_groups = sorted({groups[j] for j in test_idx})
+        if len(test_patients) == 1:
+            label = test_patients[0]["patient"]
+        elif len(test_groups) == 1:
+            label = f"{test_groups[0]}, {len(test_patients)} Aufnahmen"
+        else:
+            label = f"{len(test_groups)} Subjekte / {len(test_patients)} Aufn."
         print(f"  Fold {fi+1:>2d} [{label}]: "
               f"AUC(clf)={auc_clf:.3f}  AUC(anom)={auc_det:.3f}  "
               f"(Test: {n_test_sz} Anfalls-Fenster)")
-        fold_rows.append({"fold": fi + 1, "auc_clf": auc_clf,
+        fold_rows.append({"fold": fi + 1, "label": label, "auc_clf": auc_clf,
                           "auc_anom": auc_det, "n_test_sz": n_test_sz})
 
     if not fold_rows:
@@ -515,6 +664,9 @@ def cross_validate_patients(patients, channel_names, top_k_channels=10,
           f"+/- {auc_clf.std():.3f}")
     print(f"  Anomalie-Detektor : AUC = {auc_anom.mean():.3f} "
           f"+/- {auc_anom.std():.3f}")
+    if total_dropped:
+        print(f"  (verworfene Mischfenster im Training: {total_dropped} "
+              f"ueber alle Folds)")
 
     # Welche Kanaele wurden ueber die Folds am haeufigsten ausgewaehlt?
     order = np.argsort(channel_selection_count)[::-1]
@@ -527,6 +679,9 @@ def cross_validate_patients(patients, channel_names, top_k_channels=10,
               f"{len(fold_rows)} Folds")
 
     return {"folds": fold_rows,
+            "per_patient": per_patient,
+            "channel_names": list(channel_names),
+            "n_dropped_train": total_dropped,
             "auc_clf_mean": float(auc_clf.mean()),
             "auc_clf_std": float(auc_clf.std()),
             "auc_anom_mean": float(auc_anom.mean()),
@@ -536,7 +691,9 @@ def cross_validate_patients(patients, channel_names, top_k_channels=10,
 
 def run_on_edf(seizure_type, base_path, window_sec=2.0, overlap=0.5,
                top_k_channels=10, eval_mode="auto", n_folds=5,
-               feature_group="all", max_neg_per_fold=40000, random_state=42):
+               feature_group="all", max_neg_per_fold=40000,
+               label_purity=0.5, group_by_subject=True,
+               classifier_factory=None, random_state=42):
     """EDF-Pipeline: patientenweise einlesen + patientenweise Kreuzvalidierung.
 
     feature_group waehlt die Merkmalsmenge (siehe FEATURE_GROUPS): "all",
@@ -579,7 +736,9 @@ def run_on_edf(seizure_type, base_path, window_sec=2.0, overlap=0.5,
     return cross_validate_patients(
         patients, channel_names, top_k_channels=top_k_channels,
         eval_mode=eval_mode, n_folds=n_folds, n_feat=n_feat,
-        max_neg_per_fold=max_neg_per_fold, random_state=random_state,
+        max_neg_per_fold=max_neg_per_fold, label_purity=label_purity,
+        group_by_subject=group_by_subject,
+        classifier_factory=classifier_factory, random_state=random_state,
     )
 
 
@@ -613,17 +772,33 @@ def run_selftest():
     patients = []
     for pid in range(6):  # 6 synthetische Patienten
         sig, mask, sr = _make_synthetic_patient(seed=pid)
-        X, y = extract_window_features(sig, sr, mask, window_sec=2.0, overlap=0.5)
-        patients.append({"patient": f"synt_{pid:02d}", "X": X, "y": y})
+        X, y, frac = extract_window_features(sig, sr, mask, window_sec=2.0,
+                                             overlap=0.5)
+        # Namen im TUH-Schema <subject>_s<session>_t<token>: sonst hielte
+        # subject_of() alle synthetischen Patienten fuer EIN Subjekt und die
+        # Kreuzvalidierung wuerde mangels Gruppen gar nicht erst laufen.
+        patients.append({"patient": f"synt{pid:02d}_s001_t000", "X": X, "y": y,
+                         "frac": frac})
     channel_names = [f"EEG-{k+1}" for k in range(6)]
     print(f"{len(patients)} Patienten je "
           f"{len(patients[0]['y'])} Fenster.\n")
 
-    # bei 6 Patienten waehlt auto -> LOPO
-    cross_validate_patients(patients, channel_names, top_k_channels=3,
-                            eval_mode="auto")
+    # bei 6 Subjekten waehlt auto -> LOPO
+    r1 = cross_validate_patients(patients, channel_names, top_k_channels=3,
+                                 eval_mode="auto")
 
-    print("\n[OK] Patientenweise CV laeuft durch.")
+    print("\n--- gleiche Daten, aber nur reine Fenster im Training ---")
+    r2 = cross_validate_patients(patients, channel_names, top_k_channels=3,
+                                 eval_mode="auto", label_purity=1.0)
+
+    # Rueckgabewerte pruefen -- sonst meldet der Selbsttest auch dann "OK",
+    # wenn die Kreuzvalidierung gar nicht gelaufen ist.
+    if r1 is None or r2 is None:
+        raise SystemExit("[FEHLER] Kreuzvalidierung lieferte kein Ergebnis.")
+    if not r1["folds"] or not r2["folds"]:
+        raise SystemExit("[FEHLER] Keine auswertbaren Folds.")
+    print(f"\n[OK] Patientenweise CV laeuft durch "
+          f"({len(r1['folds'])} Folds, {len(r1['per_patient'])} Testpatienten).")
 
 
 # ===========================================================================
@@ -636,8 +811,9 @@ def main():
     )
     parser.add_argument("--selftest", action="store_true",
                         help="Synthetischer Selbsttest ohne echte Daten.")
-    parser.add_argument("--seizure-type", default=None,
-                        help="z.B. absz, cpsz, fnsz, gnsz")
+    parser.add_argument("--seizure-type", default="gnsz",
+                        help="z.B. gnsz, fnsz, cpsz, absz (Default: gnsz -- "
+                             "damit laeuft ein simples 'Run' ohne Argumente).")
     parser.add_argument("--base", default="/home/data/ninalaemmermann/forschung",
                         help="Basis-Pfad der Forschungsdaten.")
     parser.add_argument("--eval", choices=["auto", "lopo", "kfold"],
@@ -652,24 +828,39 @@ def main():
                         default="all",
                         help="Merkmalsmenge: all (Bandpower+LL+Var+RMS), "
                              "bandpower, linelength, energy, timedomain.")
-    parser.add_argument("--window-sec", type=float, default=2.0,
-                        help="Fensterlaenge in Sekunden (z.B. 5.0).")
+    parser.add_argument("--window-sec", type=float, default=5.0,
+                        help="Fensterlaenge in Sekunden. Default 5.0 passt zu "
+                             "gnsz/fnsz/cpsz (Anfaelle im Median 27-71s). Fuer "
+                             "absz besser 2.0: dort dauern Anfaelle im Median "
+                             "nur 8.3s, und 5s-Fenster kosten zwei Drittel der "
+                             "Anfalls-Fenster.")
     parser.add_argument("--overlap", type=float, default=0.5,
                         help="Fenster-Ueberlappung 0..1.")
     parser.add_argument("--max-neg-per-fold", type=int, default=40000,
                         help="Max. Ruhe-Fenster im Training pro Fold "
                              "(Rechenzeit bei vielen Patienten).")
+    parser.add_argument("--label-purity", type=float, default=0.5,
+                        help="Mindest-Anfallsanteil, damit ein Fenster im "
+                             "TRAINING als Anfall zaehlt (Ruhe entsprechend "
+                             "<= 1-Wert); dazwischen wird verworfen. "
+                             "0.5 = klassische Mehrheitsregel, nichts wird "
+                             "verworfen. 1.0 = nur reine Fenster. Der Testsatz "
+                             "bleibt immer vollstaendig.")
+    parser.add_argument("--no-subject-grouping", action="store_true",
+                        help="Folds nach Datei statt nach Subjekt bilden. "
+                             "NUR fuer Vergleichszwecke -- mehrere Aufnahmen "
+                             "derselben Person landen dann in Training UND "
+                             "Test, was die AUC schoent.")
     args = parser.parse_args()
 
     if args.selftest:
         run_selftest()
         return
 
-    if args.seizure_type is None:
-        parser.error("Bitte --seizure-type angeben (oder --selftest).")
     run_on_edf(args.seizure_type, args.base, args.window_sec, args.overlap,
                args.top_k, args.eval, args.folds, args.features,
-               args.max_neg_per_fold)
+               args.max_neg_per_fold, args.label_purity,
+               group_by_subject=not args.no_subject_grouping)
 
 
 if __name__ == "__main__":
