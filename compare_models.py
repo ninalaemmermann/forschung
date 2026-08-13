@@ -36,16 +36,29 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.stats import rankdata
 
-# Kategoriale Palette, gegen Farbfehlsichtigkeit geprueft (worst-case CVD
-# Delta-E 9.2 bei Deuteranopie, Normalsicht 16.3 -- alle Paare bestanden).
-# Zusaetzlich unterscheiden sich die Linien im Strichmuster, damit die Kurven
-# auch im Schwarzweiss-Druck trennbar bleiben.
-MODELS = [
-    ("full",       "GMM full (Bestand)", "#2a78d6", "-"),
-    ("plain-diag", "GMM diag",           "#eb6834", "--"),
-    ("boosted",    "GMM boosted",        "#4a3aa7", "-."),
-    ("histogram",  "Histogramm",         "#1baf7a", (0, (1, 1))),
+# Die Modelle zerfallen in zwei Gruppen, und genau daran haengt die Kernfrage:
+# brauchen wir die abgeleiteten Merkmale, oder reicht die rohe Amplitude?
+# Deshalb wird nach Gruppe facettiert statt alles in ein Feld zu legen.
+#
+# Das ist zugleich eine Farbnotwendigkeit: fuenf Serien in einem Feld lassen
+# sich nicht mehr so einfaerben, dass alle Paare auch bei Farbfehlsichtigkeit
+# unterscheidbar bleiben. Je Feld geprueft (alle Paare, Normalsicht und CVD):
+#   Merkmale  #2a78d6 / #eb6834 / #4a3aa7  -- worst Delta-E 13.0 (deutan)
+#   Amplitude #1baf7a / #e34948            -- worst Delta-E  6.9 (deutan),
+#                                             zulaessig mit Strichmuster + Label
+# Die Strichmuster tragen die Unterscheidung zusaetzlich in den SW-Druck.
+GROUPS = [
+    ("Merkmale (8 je Kanal)", [
+        ("full",       "GMM full",    "#2a78d6", "-"),
+        ("plain-diag", "GMM diag",    "#eb6834", "--"),
+        ("boosted",    "GMM boosted", "#4a3aa7", "-."),
+    ]),
+    ("Rohe Amplitude", [
+        ("histogram",  "Histogramm",  "#1baf7a", (0, (1, 1))),
+        ("rawgmm",     "Roh-GMM",     "#e34948", (0, (4, 1.5))),
+    ]),
 ]
+MODELS = [m for _, ms in GROUPS for m in ms]
 
 C_TEXT, C_MUTED, C_GRID = "#0b0b0b", "#52514e", "#d8d7d2"
 
@@ -106,36 +119,54 @@ def pooled_normalised(result):
 
 
 def plot_pr(runs, out_png, seizure_type):
+    """PR-Kurven, nach Merkmalen und roher Amplitude facettiert.
+
+    Das linke Feld wird im rechten blass wiederholt (und umgekehrt), damit sich
+    die Gruppen trotz Trennung direkt vergleichen lassen -- sonst muesste das
+    Auge zwischen zwei Achsen hin- und herrechnen.
+    """
     from sklearn.metrics import precision_recall_curve, average_precision_score
 
-    fig, ax = plt.subplots(figsize=(7.0, 5.6))
+    lookup = {lab: (col, ls, path) for lab, col, ls, path in runs}
+
+    curves = {}
     prevalence = None
-    for label, color, ls, path in runs:
+    for lab, (col, ls, path) in lookup.items():
         r = pickle.load(open(path, "rb"))
         y, s = pooled_normalised(r)
         prevalence = float(y.mean())
         prec, rec, _ = precision_recall_curve(y, s)
-        ap = average_precision_score(y, s)
-        ax.plot(rec, prec, color=color, lw=2, ls=ls, solid_capstyle="round",
-                label=f"{label}   AP={ap:.3f}")
+        curves[lab] = (rec, prec, average_precision_score(y, s), col, ls)
 
-    ax.axhline(prevalence, color=C_MUTED, lw=1.2, ls="--")
-    ax.text(0.015, prevalence + 0.012,
-            f"Zufall = Prävalenz {prevalence*100:.1f}%",
-            color=C_MUTED, fontsize=8.5, va="bottom")
+    fig, axes = plt.subplots(1, 2, figsize=(11.4, 5.2), sharey=True)
+    for ax, (gname, members) in zip(axes, GROUPS):
+        own = {lab for _, lab, _, _ in members}
+        # zuerst die fremden Kurven blass als Kontext
+        for lab, (rec, prec, ap, col, ls) in curves.items():
+            if lab in own:
+                continue
+            ax.plot(rec, prec, color=col, lw=1.1, ls=ls, alpha=0.22, zorder=1)
+        for lab, (rec, prec, ap, col, ls) in curves.items():
+            if lab not in own:
+                continue
+            ax.plot(rec, prec, color=col, lw=2.2, ls=ls, zorder=3,
+                    solid_capstyle="round", label=f"{lab}   AP={ap:.3f}")
 
-    ax.set_xlabel("Recall (Anteil erkannter Anfalls-Fenster)")
-    ax.set_ylabel("Precision (Anteil korrekter Alarme)")
-    ax.set_xlim(0, 1.02)
-    ax.set_ylim(0, 1.02)
-    ax.grid(zorder=0)
-    ax.set_axisbelow(True)
-    ax.set_title(f"Precision-Recall - {seizure_type.upper()}\n"
-                 f"Scores fold-weise rangnormalisiert",
-                 fontsize=11.5, loc="left")
-    ax.legend(loc="upper right", frameon=False, fontsize=9)
+        ax.axhline(prevalence, color=C_MUTED, lw=1.1, ls="--", zorder=0)
+        ax.set_xlim(0, 1.02); ax.set_ylim(0, 1.02)
+        ax.grid(zorder=0); ax.set_axisbelow(True)
+        ax.set_xlabel("Recall")
+        ax.set_title(gname, fontsize=11, loc="left")
+        ax.legend(loc="upper right", frameon=False, fontsize=8.8)
 
-    fig.tight_layout()
+    axes[0].set_ylabel("Precision (Anteil korrekter Alarme)")
+    axes[0].text(0.015, prevalence + 0.012,
+                 f"Zufall = Prävalenz {prevalence*100:.1f}%",
+                 color=C_MUTED, fontsize=8.5, va="bottom")
+    fig.suptitle(f"Precision-Recall - {seizure_type.upper()}   "
+                 f"(Scores fold-weise rangnormalisiert; blass = andere Gruppe)",
+                 fontsize=11.5, x=0.012, ha="left", y=1.0)
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
     fig.savefig(out_png, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  {out_png}")
