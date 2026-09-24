@@ -191,7 +191,7 @@ class RawSampleGMM:
     """
 
     def __init__(self, n_components_grid=(1, 2, 3, 5, 8),
-                 covariance_type="full", reg_covar=1e-6,
+                 covariance_type="full", reg_covar=1e-4,
                  max_fit_samples=200000, random_state=42):
         self.n_components_grid = n_components_grid
         self.covariance_type = covariance_type
@@ -203,20 +203,48 @@ class RawSampleGMM:
         self.log_prior_ratio = 0.0
         self.k_pos_ = self.k_neg_ = None
 
-    def _fit_best(self, X):
+    def _fit_one(self, X, k):
+        """Fittet eine Komponentenzahl, notfalls mit groesserer Regularisierung.
+
+        In rohen EEG-Abschnitten gibt es flache oder gesaettigte Stellen. Faellt
+        eine Komponente auf so einen Bereich, wird ihre Kovarianz singulaer und
+        die Cholesky-Zerlegung schlaegt fehl (bei FNSZ und CPSZ beobachtet).
+        Statt den ganzen Lauf abzubrechen wird die Regularisierung schrittweise
+        erhoeht -- und protokolliert, damit es nicht stillschweigend passiert.
+        """
         from sklearn.mixture import GaussianMixture
+        reg = self.reg_covar
+        for versuch in range(4):
+            try:
+                g = GaussianMixture(n_components=k,
+                                    covariance_type=self.covariance_type,
+                                    reg_covar=reg, max_iter=200,
+                                    random_state=self.random_state)
+                g.fit(X)
+                return g
+            except Exception as e:  # noqa: BLE001
+                if versuch == 3:
+                    print(f"    (K={k}: auch mit reg_covar={reg:.0e} "
+                          f"fehlgeschlagen, uebersprungen: {type(e).__name__})")
+                    return None
+                reg *= 100
+                print(f"    (K={k}: Kovarianz kollabiert, neuer Versuch mit "
+                      f"reg_covar={reg:.0e})")
+        return None
+
+    def _fit_best(self, X):
         best, best_bic, best_k = None, np.inf, None
         for k in self.n_components_grid:
             if k > len(X):
                 break
-            g = GaussianMixture(n_components=k,
-                                covariance_type=self.covariance_type,
-                                reg_covar=self.reg_covar, max_iter=200,
-                                random_state=self.random_state)
-            g.fit(X)
+            g = self._fit_one(X, k)
+            if g is None:
+                continue
             bic = g.bic(X)
             if bic < best_bic:
                 best, best_bic, best_k = g, bic, k
+        if best is None:
+            raise RuntimeError("Kein GMM liess sich anpassen.")
         return best, best_k
 
     def fit(self, patients_train, channels):
@@ -242,8 +270,13 @@ class RawSampleGMM:
         if n_neg_all > self.max_fit_samples:
             N = N[rng.choice(n_neg_all, self.max_fit_samples, replace=False)]
 
-        self.gmm_pos, self.k_pos_ = self._fit_best((P - self._mean) / self._std)
-        self.gmm_neg, self.k_neg_ = self._fit_best((N - self._mean) / self._std)
+        # float64: sklearn nennt float32 ausdruecklich als Ursache fuer
+        # fehlschlagende Cholesky-Zerlegungen. Gespeichert wird float32
+        # (Speicher), gerechnet wird float64.
+        self.gmm_pos, self.k_pos_ = self._fit_best(
+            ((P - self._mean) / self._std).astype(np.float64))
+        self.gmm_neg, self.k_neg_ = self._fit_best(
+            ((N - self._mean) / self._std).astype(np.float64))
         self.log_prior_ratio = float(np.log(n_pos_all / n_neg_all))
         return self
 
@@ -254,7 +287,8 @@ class RawSampleGMM:
         unabhaengig von seiner Laenge -- bei 50% Ueberlappung waere die naive
         Variante sonst doppelte Arbeit.
         """
-        X = ((patient["S"][channels].T - self._mean) / self._std)
+        X = (((patient["S"][channels].T - self._mean) / self._std)
+             .astype(np.float64))
         lr = (self.gmm_pos.score_samples(X) - self.gmm_neg.score_samples(X)
               + self.log_prior_ratio)
         cum = np.concatenate([[0.0], np.cumsum(lr)])

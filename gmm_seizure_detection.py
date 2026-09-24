@@ -92,9 +92,7 @@ FEATURE_GROUPS = {
 AUTO_LOPO_MAX_PATIENTS = 25
 
 
-# ===========================================================================
 # 1. Fenster-Feature-Extraktion
-# ===========================================================================
 def _bandpowers(window, sampling_rate):
     """Relative Bandpower je Frequenzband via Welch-PSD."""
     nperseg = int(min(len(window), max(32, sampling_rate)))
@@ -275,9 +273,8 @@ def build_patient_datasets(seizure_dict, data_folder, window_sec=2.0,
     return patients, channel_names
 
 
-# ===========================================================================
-# 2. Kanalauswahl per JS-Divergenz (spiegelt compare_js_divergence_channels.py)
-# ===========================================================================
+
+# 2. Kanalauswahl per JS-Divergenz
 def js_divergence_1d(a, b, n_bins=50):
     """JS-Divergenz (Basis 2, in bit) zwischen zwei 1D-Stichproben."""
     if len(a) == 0 or len(b) == 0:

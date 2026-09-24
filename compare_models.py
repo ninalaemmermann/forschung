@@ -71,6 +71,36 @@ plt.rcParams.update({
 })
 
 
+def find_runs_by_key(out_dir, seizure_type):
+    """Wie find_runs, aber als {Modell-Schluessel: Pfad}."""
+    keys = [k for k, _, _, _ in MODELS]
+    out = {}
+    for key, label, color, ls, path in _search(out_dir, seizure_type, keys):
+        out[key] = path
+    return out
+
+
+def _search(out_dir, seizure_type, keys):
+    """Gemeinsame Dateisuche fuer beide Zugriffswege."""
+    for key, label, color, ls in MODELS:
+        if key not in keys:
+            continue
+        hits = []
+        for f in sorted(os.listdir(out_dir)):
+            if not f.endswith(".pkl") or not f.startswith(seizure_type.lower()):
+                continue
+            rest = f[len(seizure_type):]
+            if key == "full":
+                if any(k in rest for k, _, _, _ in MODELS if k != "full"):
+                    continue
+                hits.append(f)
+            elif key in rest:
+                hits.append(f)
+        hits = [h for h in hits if "bysubj" in h]
+        if hits:
+            yield key, label, color, ls, os.path.join(out_dir, hits[0])
+
+
 def find_runs(out_dir, seizure_type):
     """Sucht zu einem Anfallstyp die .pkl aller Modelle."""
     found = []
@@ -214,16 +244,173 @@ def plot_auc_spread(runs, out_png, seizure_type):
     print(f"  {out_png}")
 
 
+# Typ-uebergreifende Abbildungen (Anfallstyp x Modell)
+# Fuer die Hauptabbildungen werden nur die drei REPRAESENTATIONEN gezeigt --
+# diag und boosted sind Varianten innerhalb des Merkmals-Ansatzes und gehoeren
+# in eine Nebentabelle, nicht in die Kernaussage.
+# Farben je Paar geprueft (alle Paare): Normalsicht worst Delta-E 24.0,
+# CVD worst 6.9 (deutan) -- zulaessig, weil die Serien zusaetzlich durch
+# Achsenposition bzw. Strichmuster und direkte Beschriftung getrennt sind.
+HEADLINE = [
+    ("full",      "Feature-GMM", "#2a78d6", "-"),
+    ("histogram", "Histogramm",  "#1baf7a", (0, (1, 1))),
+    ("rawgmm",    "Roh-GMM",     "#e34948", (0, (4, 1.5))),
+]
+
+
+def _load_headline(out_dir, seizure_type):
+    """Laedt die drei Hauptmodelle zu einem Anfallstyp.
+
+    Zugeordnet wird ueber den Modell-SCHLUESSEL (Dateinamensbestandteil), nicht
+    ueber die Beschriftung -- die Hauptabbildungen benennen die Modelle nach der
+    Repraesentation ("Feature-GMM"), die Detailabbildungen nach der Variante
+    ("GMM full").
+    """
+    paths = find_runs_by_key(out_dir, seizure_type)
+    return [(lab, col, ls, paths[key])
+            for key, lab, col, ls in HEADLINE if key in paths]
+
+
+def plot_matrix(per_type, out_png):
+    """AUC je Aufnahme als Punktwolke, gruppiert nach Anfallstyp und Modell.
+
+    Bewusst KEINE Balken mit Mittelwert +/- Std: die Verteilungen sind deutlich
+    linksschief und bei GNSZ breit gestreut, ein Mittelwert taeuscht Symmetrie
+    vor, die nicht existiert.
+
+    Bewusst AUC und nicht AP auf der y-Achse: die AP je Aufnahme korreliert mit
+    r = +0.57 mit der Anfallshaeufigkeit dieser Aufnahme (bei GNSZ zwischen
+    0.3 % und 99 %). Ein AP-Punktdiagramm zeigte groesstenteils die Praevalenz,
+    nicht die Modellguete. Die gepoolte AP steht deshalb als Zahl darunter --
+    dort ist sie sinnvoll, weil ueber alle Aufnahmen gemeinsam gerechnet.
+    """
+    from sklearn.metrics import average_precision_score
+
+    n_groups = len(per_type)
+    fig, ax = plt.subplots(figsize=(2.9 * n_groups + 3.2, 5.8))
+    rng = np.random.default_rng(0)
+    xt, xl, pos = [], [], 0.0
+
+    for gi, (tname, runs) in enumerate(per_type):
+        for lab, color, ls, path in runs:
+            r = pickle.load(open(path, "rb"))
+            a = np.array([p["auc_clf"] for p in r["per_patient"]
+                          if p["auc_clf"] is not None])
+            y, s = pooled_normalised(r)
+            ap = average_precision_score(y, s)
+            prev = float(y.mean())
+
+            jit = rng.uniform(-0.19, 0.19, size=len(a))
+            ax.scatter(pos + jit, a, s=26, color=color, alpha=0.45,
+                       edgecolor="none", zorder=2)
+            med = float(np.median(a))
+            ax.plot([pos - 0.34, pos + 0.34], [med, med], color=color, lw=3,
+                    zorder=4, solid_capstyle="round")
+            ax.text(pos, -0.075, f"AP {ap:.3f}", ha="center", fontsize=8.5,
+                    color=color, fontfamily="monospace", weight="bold")
+            ax.text(pos, -0.125, f"n={len(a)}", ha="center", fontsize=7.5,
+                    color=C_MUTED, fontfamily="monospace")
+            xt.append(pos); xl.append(lab)
+            pos += 1.0
+        # Praevalenz-Hinweis ueber der Gruppe
+        ax.text(pos - 2.0, 1.045, f"{tname}   (Prävalenz {prev*100:.1f} %)",
+                ha="center", fontsize=11.5, weight="bold")
+        pos += 0.9
+        if gi < n_groups - 1:
+            ax.axvline(pos - 1.45, color=C_GRID, lw=1)
+
+    ax.axhline(0.5, color=C_MUTED, lw=1, ls=":", zorder=1)
+    ax.text(-0.55, 0.5, "Zufall", fontsize=8.5, color=C_MUTED, va="bottom")
+    ax.set_xticks(xt)
+    ax.set_xticklabels(xl, fontsize=9.5)
+    ax.set_xlim(-0.7, pos - 1.2)
+    ax.set_ylim(0, 1.05)
+    ax.set_ylabel("AUC je Aufnahme (Test = nie im Training gesehen)")
+    ax.grid(axis="y", zorder=0)
+    ax.set_axisbelow(True)
+    ax.spines["bottom"].set_visible(False)
+    ax.tick_params(axis="x", length=0, pad=26)
+
+    fig.tight_layout(rect=(0, 0, 1, 0.955))
+    # Hinweis oberhalb der Gruppenueberschriften, damit nichts kollidiert
+    fig.text(0.005, 0.985, "Ein Punkt = eine Aufnahme, Strich = Median",
+             fontsize=10, color=C_MUTED, ha="left", va="top")
+    fig.savefig(out_png, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  {out_png}")
+
+
+def plot_pr_by_type(per_type, out_png):
+    """PR-Kurven, ein Feld je Anfallstyp, dieselben drei Modelle.
+
+    Die gestrichelte Linie ist das Zufallsniveau und liegt je Feld anders --
+    3.1 % bei ABSZ, 22.2 % bei GNSZ. Genau daran sieht man, wie weit die
+    Modelle bei GNSZ ans Raten heranruecken, was eine gemeinsame y-Achse
+    allein nicht zeigen wuerde.
+    """
+    from sklearn.metrics import precision_recall_curve, average_precision_score
+
+    fig, axes = plt.subplots(1, len(per_type),
+                             figsize=(5.6 * len(per_type), 5.2), sharey=True)
+    if len(per_type) == 1:
+        axes = [axes]
+    for ax, (tname, runs) in zip(axes, per_type):
+        prev = None
+        for lab, color, ls, path in runs:
+            r = pickle.load(open(path, "rb"))
+            y, s = pooled_normalised(r)
+            prev = float(y.mean())
+            prec, rec, _ = precision_recall_curve(y, s)
+            ax.plot(rec, prec, color=color, lw=2.2, ls=ls, zorder=3,
+                    solid_capstyle="round",
+                    label=f"{lab}   AP={average_precision_score(y, s):.3f}")
+        ax.axhline(prev, color=C_MUTED, lw=1.3, ls="--", zorder=1)
+        # Beschriftung ueber die Linie setzen, nicht darauf -- bei vier
+        # schmalen Panels laege sie sonst mitten im Strich
+        ax.text(0.985, prev + 0.028, f"Zufall = Prävalenz {prev*100:.1f} %",
+                ha="right", va="bottom", color=C_MUTED, fontsize=8.5)
+        ax.set_xlim(0, 1.02); ax.set_ylim(0, 1.02)
+        ax.grid(zorder=0); ax.set_axisbelow(True)
+        ax.set_xlabel("Recall (Anteil erkannter Anfalls-Fenster)")
+        ax.set_title(tname, fontsize=12, loc="left", weight="bold")
+        ax.legend(loc="upper right", frameon=False, fontsize=9)
+    axes[0].set_ylabel("Precision (Anteil korrekter Alarme)")
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  {out_png}")
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seizure-type", default="gnsz")
+    ap.add_argument("--matrix", nargs="+", default=None,
+                    help="Typ-uebergreifende Hauptabbildungen, z.B. "
+                         "--matrix absz gnsz")
     ap.add_argument("--base", default="/home/data/ninalaemmermann/forschung")
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
 
     out_dir = args.out_dir or os.path.join(args.base, "Plots", "detector")
+
+    if args.matrix:
+        per_type = []
+        for t in args.matrix:
+            runs = _load_headline(out_dir, t)
+            print(f"{t.upper()}: {len(runs)} Hauptmodelle")
+            if runs:
+                per_type.append((t.upper(), runs))
+        if not per_type:
+            print("Keine Laeufe gefunden.")
+            return
+        print("\nHauptabbildungen:")
+        tag = "_".join(t.lower() for t in args.matrix)
+        plot_matrix(per_type, os.path.join(out_dir, f"HAUPT_{tag}_matrix.png"))
+        plot_pr_by_type(per_type, os.path.join(out_dir, f"HAUPT_{tag}_pr.png"))
+        return
+
     runs = find_runs(out_dir, args.seizure_type)
     if len(runs) < 2:
         print("Zu wenige Laeufe fuer einen Vergleich.")
