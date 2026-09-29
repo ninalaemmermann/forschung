@@ -13,7 +13,6 @@ dem Median der Eigenwertspektren und dem 25–75 %-Band.
 import argparse
 import pickle
 import sys
-import warnings
 from pathlib import Path
 
 import matplotlib
@@ -35,6 +34,8 @@ TYPEN = ("absz", "cpsz", "gnsz", "fnsz")
 ARTEN = ("ruhe", "uebergang", "anfall")
 BESCHRIFTUNG = {"ruhe": "Ruhe", "uebergang": "Übergang", "anfall": "Anfall"}
 FARBE = {"ruhe": DATEN, "uebergang": RAMPE_STUFEN[2], "anfall": SURROGAT}
+FARBE_TYP = {"absz": DATEN, "cpsz": SURROGAT, "gnsz": RAMPE_STUFEN[2], "fnsz": INK_SEK}
+MARKER_TYP = {"absz": "o", "cpsz": "s", "gnsz": "^", "fnsz": "D"}
 N_KANAL = 27
 # Richtungen von R unterhalb dieses Anteils am größten Eigenwert sind tot
 # (Average-Referenz); eigh(C, R) verlangt ein positiv definites R.
@@ -143,44 +144,106 @@ def werte_typ_aus(typ, base, L, abstand):
 # Abbildung
 # ===========================================================================
 
-def abbildung(ergebnisse, L, ziel):
+def richtungen_fuer_anteil(med, anteil=0.9):
+    """Wie viele führende Richtungen tragen ``anteil`` von Σ(λ − 1)?"""
+    snr = med[np.isfinite(med)] - 1.0
+    return int(np.argmax(np.cumsum(snr) / snr.sum() >= anteil)) + 1
+
+
+def je_patient(eintraege):
+    """Median-Spektrum je Patient (n_patienten, 27) und die Zahl der Fenster.
+
+    Nur volle Spektren (r = 27), damit Richtung i überall dasselbe bedeutet.
+    Jeder Patient zählt gleich - sonst dominieren Patienten mit vielen Anfällen.
+    """
+    gruppen = {}
+    for e in eintraege:
+        if e["r"] == N_KANAL:
+            gruppen.setdefault(e["datei"][:8], []).append(e["lam"])
+    n_fenster = sum(len(v) for v in gruppen.values())
+    return np.array([np.median(v, axis=0) for v in gruppen.values()]), n_fenster
+
+
+def zeichne(ax, eintraege, farbe, name, log, marker="o"):
+    """Median und 25–75 % über Patienten; gibt False zurück, wenn nichts da ist."""
+    P, n_fenster = je_patient(eintraege)
+    if len(P) == 0:
+        return False
+    x = np.arange(1, N_KANAL + 1)
+    med = np.median(P, axis=0)
+    lo, hi = np.percentile(P, [25, 75], axis=0)
+    if log:
+        zusatz = " → K = %d" % signalrichtungen(med)
+    else:
+        zusatz = ": 90 %% SNR in %d Richtungen" % richtungen_fuer_anteil(med)
+    ax.fill_between(x, lo, hi, color=farbe, alpha=0.18, linewidth=0)
+    (ax.semilogy if log else ax.plot)(
+        x, med, marker + "-", color=farbe, markersize=4,
+        label="%s (%d Pat., %d Fenster)%s" % (name, len(P), n_fenster, zusatz))
+    return True
+
+
+def rahmen(ax, titel, log):
+    ax.axhline(1.0, color=MUTED, linestyle="--", linewidth=1.2)
+    ax.text(N_KANAL * 0.45, 1.0, " λ = 1: reines Rauschen", fontsize=8,
+            color=INK_SEK, va="bottom")
+    ax.set_title(titel, fontsize=10)
+    ax.set_xlabel("Richtung")
+    ax.set_ylabel("λ")
+    if not log:
+        ax.set_ylim(bottom=0)
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend(fontsize=7.5, frameon=False)
+    else:
+        ax.text(0.5, 0.5, "keine Fenster", transform=ax.transAxes, ha="center")
+
+
+def untertitel(L, log):
+    return ("Fenster %.3g s, Median und 25–75 %% über Patienten%s"
+            % (L, "" if log else ", lineare Achse"))
+
+
+def abbildung(ergebnisse, L, ziel, log=True):
+    """Ein Panel je Anfallstyp, darin die drei Zustände; gemeinsame y-Achse."""
     typen = list(ergebnisse)
     zeilen = int(np.ceil(len(typen) / 2))
-    fig, achsen = plt.subplots(zeilen, 2, figsize=(12, 4.6 * zeilen), squeeze=False)
-    fig.suptitle("EEG — Schritt 1+2 je Anfallstyp (Fenster %.3g s, Median und 25–75 %%)" % L)
-
+    fig, achsen = plt.subplots(zeilen, 2, figsize=(12, 4.6 * zeilen), squeeze=False,
+                               sharey=True)
+    fig.suptitle("EEG — Schritt 1+2 je Anfallstyp (%s)" % untertitel(L, log))
     for ax, typ in zip(achsen.flat, typen):
         stil_achse(ax)
-        x = np.arange(1, N_KANAL + 1)
         for art in ARTEN:
-            eintraege = ergebnisse[typ][art]
-            if not eintraege:
-                continue
-            M = np.array([e["lam"] for e in eintraege])
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", RuntimeWarning)   # Spalten nur aus NaN
-                med = np.nanmedian(M, axis=0)
-                lo, hi = np.nanpercentile(M, [25, 75], axis=0)
-            K = signalrichtungen(med[np.isfinite(med)])
-            ax.fill_between(x, lo, hi, color=FARBE[art], alpha=0.2, linewidth=0)
-            ax.semilogy(x, med, "o-", color=FARBE[art], markersize=4,
-                        label="%s (n = %d) → K = %d" % (BESCHRIFTUNG[art], len(eintraege), K))
-        ax.axhline(1.0, color=MUTED, linestyle="--", linewidth=1.2)
-        ax.text(N_KANAL * 0.45, 1.0, " λ = 1: reines Rauschen", fontsize=8,
-                color=INK_SEK, va="bottom")
-        ax.set_title("%s — Schritt 1+2: λ = 1 + SNR je Richtung" % typ.upper(), fontsize=10)
-        ax.set_xlabel("Richtung")
-        ax.set_ylabel("λ")
-        if ax.get_legend_handles_labels()[0]:
-            ax.legend(fontsize=8, frameon=False)
-        else:
-            ax.text(0.5, 0.5, "keine Fenster", transform=ax.transAxes, ha="center")
+            zeichne(ax, ergebnisse[typ][art], FARBE[art], BESCHRIFTUNG[art], log)
+        rahmen(ax, "%s — λ = 1 + SNR je Richtung" % typ.upper(), log)
     for ax in list(achsen.flat)[len(typen):]:
         ax.set_visible(False)
-
     fig.tight_layout()
     fig.savefig(ziel, dpi=140)
     plt.close(fig)
+
+
+def abbildung_zustaende(ergebnisse, L, ziel, log=True):
+    """Ein Panel je Zustand, darin die Anfallstypen; gemeinsame y-Achse."""
+    fig, achsen = plt.subplots(1, len(ARTEN), figsize=(17, 5.2), sharey=True)
+    fig.suptitle("EEG — Schritt 1+2 je Zustand (%s)" % untertitel(L, log))
+    for ax, art in zip(achsen, ARTEN):
+        stil_achse(ax)
+        for typ in ergebnisse:
+            zeichne(ax, ergebnisse[typ][art], FARBE_TYP[typ], typ.upper(), log,
+                    marker=MARKER_TYP[typ])
+        rahmen(ax, "%s — λ = 1 + SNR je Richtung" % BESCHRIFTUNG[art], log)
+    fig.tight_layout()
+    fig.savefig(ziel, dpi=140)
+    plt.close(fig)
+
+
+def alle_abbildungen(ergebnisse, L, stamm):
+    """Vier Bilder: je Typ und je Zustand, jeweils logarithmisch und linear."""
+    stamm = str(stamm)
+    abbildung(ergebnisse, L, stamm + ".png")
+    abbildung(ergebnisse, L, stamm + "_linear.png", log=False)
+    abbildung_zustaende(ergebnisse, L, stamm + "_zustaende.png")
+    abbildung_zustaende(ergebnisse, L, stamm + "_zustaende_linear.png", log=False)
 
 
 def main():
@@ -206,8 +269,8 @@ def main():
     with open(ausgabe / (stamm + ".pkl"), "wb") as fh:
         pickle.dump({"fenster_sek": L, "ruhe_abstand": args.ruhe_abstand,
                      "ergebnisse": ergebnisse}, fh)
-    abbildung(ergebnisse, L, ausgabe / (stamm + ".png"))
-    print("gespeichert:", ausgabe / (stamm + ".png"))
+    alle_abbildungen(ergebnisse, L, ausgabe / stamm)
+    print("gespeichert:", ausgabe / (stamm + "*.png"))
 
 
 if __name__ == "__main__":
