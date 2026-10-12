@@ -1,5 +1,19 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:conda",
     "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "python.analysis.extraPaths": ["./stdgl/werkzeuge"]
+    "python.analysis.extraPaths": [
+        "./stdgl/werkzeuge"
+    ],
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/.jj": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
+        "**/beweis_skalierung.aux": true,
+        "**/beweis_skalierung.log": true,
+        "**/beweis_skalierung.gz": true,
+        "**/beweis_skalierung.out": true
+    }
 }

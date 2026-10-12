@@ -10,6 +10,7 @@ dem Median der Eigenwertspektren und dem 25–75 %-Band.
 
     python eeg_signalraum.py --typen absz --fenster-sek 3
     python eeg_signalraum.py --methode pca     # Vergleich: Eigenwerte von C allein
+    python eeg_signalraum.py --methode dyca    # DyCA: C1·C0⁻¹·C1ᵀ·u = λ·C2·u
 """
 import argparse
 import pickle
@@ -22,6 +23,7 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 from scipy.linalg import eigh, eigvalsh
+from dyca import dyca          # pip install git+https://github.com/TobiasPrirsch/dyca
 
 HIER = Path(__file__).resolve().parent
 sys.path.insert(0, str(HIER.parent / "stdgl" / "Signalrekonstruktion"))
@@ -90,6 +92,9 @@ def spektrum(Y, methode="snr"):
     methode "snr": C·v = λ·R·v, λ = 1 + SNR.
     methode "pca": Eigenwerte von C allein (der Fall R = σ²·I), normiert auf den
     Varianzanteil - sonst entscheidet die absolute Amplitude über den Median.
+    methode "dyca": generalisierte DyCA-Eigenwerte C1·C0⁻¹·C1ᵀ·u = λ·C2·u, λ in [0, 1].
+    Zentriert, auf den Rang projiziert (C0 muss invertierbar sein). Der Zeitindex
+    ist egal: λ ändert sich nicht, wenn die Ableitung mit einem Faktor skaliert wird.
     """
     R, _ = rauschmatrix(Y)
     if not np.isfinite(R).all():
@@ -99,9 +104,15 @@ def spektrum(Y, methode="snr"):
         return None, 0
     P = U[:, ev > RANG_SCHWELLE * ev[-1]]
     Yp = Y @ P
-    if methode == "pca":
+    if methode == "dyca":
+        try:
+            lam = dyca(Yp - Yp.mean(axis=0))["generalized_eigenvalues"]
+        except ValueError:          # komplexe Eigenwerte oder C0 nicht invertierbar
+            return None, 0
+    elif methode in ("pca", "pca_roh"):
         lam = eigvalsh(np.cov(Yp - Yp.mean(axis=0), rowvar=False))[::-1]
-        lam = lam / lam.sum()
+        if methode == "pca":
+            lam = lam / lam.sum()        # pca_roh: λ in µV², ohne Normierung
     else:
         Rp, _ = rauschmatrix(Yp)
         lam = signalraum(Yp, Rp, k=3)[1]
@@ -110,7 +121,12 @@ def spektrum(Y, methode="snr"):
     return aus, P.shape[1]
 
 
-def werte_typ_aus(typ, base, L, abstand, methode="snr"):
+def stamm_zusatz(methode, skalieren):
+    """Methodenteil des Dateinamens, z. B. "pca_", "dyca_skaliert_"."""
+    return ("" if methode == "snr" else methode + "_") + ("skaliert_" if skalieren else "")
+
+
+def werte_typ_aus(typ, base, L, abstand, methode="snr", skalieren=False):
     st = typ.upper()
     anfallsliste = get_sz_start_end(base / f"{st}_seizures.csv")
     ordner = base / "Data" / f"{st}_seizure_WB"
@@ -137,11 +153,18 @@ def werte_typ_aus(typ, base, L, abstand, methode="snr"):
                     continue
                 gesehen.add((art, i0))
                 Y = raw.get_data(start=i0, stop=i0 + n_win).T * 1e6   # µV
+                sigma = Y.std(axis=0)
+                if skalieren:
+                    # StandardScaler je Fenster: je Kanal Mittelwert 0, Std 1
+                    if not (sigma > 0).all():
+                        continue
+                    Y = (Y - Y.mean(axis=0)) / sigma
                 lam, r = spektrum(Y, methode)
                 if lam is None:
                     continue
                 ergebnis[art].append({"datei": datei, "anfall": (a, b),
-                                      "start_s": i0 / sr, "r": r, "lam": lam})
+                                      "start_s": i0 / sr, "r": r, "lam": lam,
+                                      "sigma": sigma})
 
     for art in ARTEN:
         rs = [e["r"] for e in ergebnis[art]]
@@ -161,6 +184,17 @@ def richtungen_fuer_anteil(med, anteil=0.9, sockel=1.0):
     """
     snr = med[np.isfinite(med)] - sockel
     return int(np.argmax(np.cumsum(snr) / snr.sum() >= anteil)) + 1
+
+
+def legende_zusatz(med, methode, log=True):
+    """Kurzangabe zur Dimension für die Legende."""
+    if methode == "dyca":
+        return ""
+    if methode != "snr":
+        return ": 90 %% Varianz in %d Richtungen" % richtungen_fuer_anteil(med, sockel=0.0)
+    if log:
+        return " → K = %d" % signalrichtungen(med)
+    return ": 90 %% SNR in %d Richtungen" % richtungen_fuer_anteil(med)
 
 
 def je_patient(eintraege):
@@ -185,12 +219,7 @@ def zeichne(ax, eintraege, farbe, name, log, marker="o", methode="snr"):
     x = np.arange(1, N_KANAL + 1)
     med = np.median(P, axis=0)
     lo, hi = np.percentile(P, [25, 75], axis=0)
-    if methode == "pca":
-        zusatz = ": 90 %% Varianz in %d Richtungen" % richtungen_fuer_anteil(med, sockel=0.0)
-    elif log:
-        zusatz = " → K = %d" % signalrichtungen(med)
-    else:
-        zusatz = ": 90 %% SNR in %d Richtungen" % richtungen_fuer_anteil(med)
+    zusatz = legende_zusatz(med, methode, log)
     ax.fill_between(x, lo, hi, color=farbe, alpha=0.18, linewidth=0)
     (ax.semilogy if log else ax.plot)(
         x, med, marker + "-", color=farbe, markersize=4,
@@ -204,23 +233,31 @@ def rahmen(ax, titel, log, methode="snr"):
         ax.text(N_KANAL * 0.45, 1.0, " λ = 1: reines Rauschen", fontsize=8,
                 color=INK_SEK, va="bottom")
     ax.set_title(titel, fontsize=10)
-    ax.set_xlabel("Richtung" if methode == "snr" else "Hauptkomponente")
-    ax.set_ylabel("λ" if methode == "snr" else "Varianzanteil λ / Σλ")
+    ax.set_xlabel({"snr": "Richtung", "dyca": "DyCA-Komponente"}.get(methode, "Hauptkomponente"))
+    ax.set_ylabel({"snr": "λ", "pca": "Varianzanteil λ / Σλ", "pca_roh": "λ [µV²]",
+                   "dyca": "DyCA-Eigenwert λ"}[methode])
     if not log:
-        ax.set_ylim(bottom=0)
+        # DyCA-Eigenwerte liegen in [0, 1]: feste Achse, damit Panels vergleichbar sind
+        ax.set_ylim(0, 1.02) if methode == "dyca" else ax.set_ylim(bottom=0)
     if ax.get_legend_handles_labels()[0]:
         ax.legend(fontsize=7.5, frameon=False)
     else:
         ax.text(0.5, 0.5, "keine Fenster", transform=ax.transAxes, ha="center")
 
 
+SKALIERT = False   # in main gesetzt; nur für den Untertitel
+
+
 def untertitel(L, log):
-    return ("Fenster %.3g s, Median und 25–75 %% über Patienten%s"
-            % (L, "" if log else ", lineare Achse"))
+    return ("Fenster %.3g s%s, Median und 25–75 %% über Patienten%s"
+            % (L, ", StandardScaler je Fenster" if SKALIERT else "",
+               "" if log else ", lineare Achse"))
 
 
-KOPF = {"snr": "Schritt 1+2", "pca": "PCA-Eigenwerte"}
-PANEL = {"snr": "λ = 1 + SNR je Richtung", "pca": "PCA, Varianzanteil"}
+KOPF = {"snr": "Schritt 1+2", "pca": "PCA-Eigenwerte", "pca_roh": "PCA-Eigenwerte, roh",
+        "dyca": "DyCA-Eigenwerte"}
+PANEL = {"snr": "λ = 1 + SNR je Richtung", "pca": "PCA, Varianzanteil",
+         "pca_roh": "PCA, λ in µV²", "dyca": "DyCA, generalisierte Eigenwerte"}
 
 
 def abbildung(ergebnisse, L, ziel, log=True, methode="snr"):
@@ -275,8 +312,11 @@ def main():
     ap.add_argument("--fenster-sek", type=float, default=3.0)
     ap.add_argument("--ruhe-abstand", type=float, default=30.0,
                     help="Mindestabstand des Ruhefensters zu jedem Anfall (s)")
-    ap.add_argument("--methode", choices=("snr", "pca"), default="snr",
-                    help="snr: C·v = λ·R·v (Standard); pca: Eigenwerte von C allein")
+    ap.add_argument("--skalieren", action="store_true",
+                    help="StandardScaler je Fenster vor Schritt 1 + 2")
+    ap.add_argument("--methode", choices=("snr", "pca", "pca_roh", "dyca"), default="snr",
+                    help="snr: C·v = λ·R·v (Standard); pca: Eigenwerte von C als Varianzanteil; "
+                         "pca_roh: Eigenwerte von C in µV²; dyca: generalisierte DyCA-Eigenwerte")
     ap.add_argument("--base", type=Path, default=Path("/home/data/ninalaemmermann/forschung"))
     args = ap.parse_args()
 
@@ -287,12 +327,15 @@ def main():
     ergebnisse = {}
     for typ in args.typen:
         print("%s:" % typ.upper())
-        ergebnisse[typ] = werte_typ_aus(typ, args.base, L, args.ruhe_abstand, args.methode)
+        ergebnisse[typ] = werte_typ_aus(typ, args.base, L, args.ruhe_abstand, args.methode,
+                                        args.skalieren)
 
-    stamm = "eigenwerte_eeg_%s%gs" % ("pca_" if args.methode == "pca" else "", L)
+    global SKALIERT
+    SKALIERT = args.skalieren
+    stamm = "eigenwerte_eeg_%s%gs" % (stamm_zusatz(args.methode, args.skalieren), L)
     with open(ausgabe / (stamm + ".pkl"), "wb") as fh:
         pickle.dump({"fenster_sek": L, "ruhe_abstand": args.ruhe_abstand,
-                     "methode": args.methode,
+                     "methode": args.methode, "skalieren": args.skalieren,
                      "ergebnisse": ergebnisse}, fh)
     alle_abbildungen(ergebnisse, L, ausgabe / stamm, args.methode)
     print("gespeichert:", ausgabe / (stamm + "*.png"))
