@@ -1,0 +1,146 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EEG-Signalraum: SNR und DyCA</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap"><style>
+html,body{margin:0;background:#2b2f36;}
+body{font-family:Arial,sans-serif;}
+.hilfe{color:#c9d1d9;font:16px Arial,sans-serif;padding:12px 16px;}
+.rahmen{margin:0 auto 24px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.4);}
+section{width:1920px;height:1080px;position:relative;box-sizing:border-box;overflow:hidden;
+  display:flex;flex-direction:column;transform-origin:0 0;}
+section div{box-sizing:border-box;} section div:not([style*="display"]){display:flex;flex-direction:column;}
+section p,section h1,section h2,section h3,section ul,section ol{margin:0;}
+section h1{font-size:96px;font-weight:600;line-height:1.1;}
+section h2{font-size:64px;font-weight:600;line-height:1.15;}
+section h3{font-size:44px;font-weight:600;line-height:1.2;}
+section p{line-height:1.4;}
+section ul{padding-left:1.2em;}
+section img{display:block;flex-shrink:0;}
+section table{border-collapse:collapse;width:100%;}
+section th,section td{padding:.35em .6em;border-bottom:1px solid rgba(128,128,128,.35);text-align:left;}
+section th{font-weight:600;}
+section aside{display:none;}
+.nummer{color:#8b949e;font:14px Arial,sans-serif;text-align:center;margin:-16px 0 24px;}
+</style></head><body><p class="hilfe">EEG-Signalraum: SNR und DyCA · 10 Folien · Sprechernotizen ausgeblendet</p><div class="rahmen"><section id="cover" style="background:#1B2430;color:#F4F2EC;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;justify-content:center;gap:40px">
+<p style="font-size:32px;color:#F08A5D;font-weight:600;letter-spacing:2px;text-transform:uppercase">EEG-Signalraum · Stand 22.10.2026</p>
+<h1 style="font-size:104px;font-weight:700;line-height:1.08;width:1500px">SNR und DyCA im Vergleich</h1>
+<p style="font-size:40px;color:#C9D3DE;line-height:1.4;width:1400px">Gefilterte gegen ungefilterte TUH-Daten, Absencen und fokale Anfälle</p>
+<aside>Neue Ergebnisse seit 19.10. Kernfrage: Welche Methode erkennt Anfälle, und hängt das von der Filterung der Daten ab? Gefiltert = WB-Daten, BESA-Export mit 27 interpolierten Kanälen, Tiefpass ~40 Hz, Notch, Average-Referenz. Ungefiltert = TUH resampelt, 21 Kanäle, 256 Hz.</aside>
+</section></div><div class="nummer">1 / 10 · cover</div><div class="rahmen"><section id="snr-absz" style="background:#F7F6F2;color:#1B2430;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:32px">
+<p style="font-size:28px;color:#2A6FDB;font-weight:600;text-transform:uppercase;letter-spacing:2px">Absencen · SNR</p>
+<h2 style="font-size:60px;font-weight:700;line-height:1.1">SNR trennt nur auf ungefilterten Daten</h2>
+<div style="display:flex;gap:48px;align-items:start">
+<img src="bilder/tuh_resampelt_3s_datensaetze.png" alt="Eigenwertspektren Ruhe, Übergang und Anfall: links gefiltert deckungsgleich, rechts ungefiltert liegt die Ruhe deutlich tiefer" style="width:1180px;height:440px;object-fit:contain;background:#FFFFFF;border-radius:12px">
+
+</div>
+<p style="font-size:32px;line-height:1.4;color:#1B2430;width:1500px">Gefiltert liegen Ruhe, Übergang und Anfall übereinander. Ungefiltert liegt die Ruhe deutlich tiefer.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#6A7179">TUH-ABSZ, 16 gemeinsame Aufnahmen, feste 3-s-Fenster · Zeitverlauf: 3 Aufnahmen · 2</p>
+<aside>Links die gefilterten WB-Daten, rechts dieselben Aufnahmen ungefiltert. Median über 10 Patienten, 3-s-Fenster. Gefiltert sind die Kurven deckungsgleich, K = 12 in allen drei Zuständen. Ungefiltert liegt die Ruhe etwa 3–5-fach tiefer. Grund: Die WB-Daten sind ein BESA-Export mit interpolierten Kanälen, Tiefpass und Notch; dadurch misst λ dort vor allem die Montage. Zwischen den Anfällen in bqv (11 Anfälle): ungefiltert heben sich 9 von 11 klar ab, gefiltert nur 1. Zwischen Dateien: aaaaacyi trennt auch ungefiltert in den festen Fenstern nicht.</aside>
+</section></div><div class="nummer">2 / 10 · snr-absz</div><div class="rahmen"><section id="snr-faelle" style="background:#F7F6F2;color:#1B2430;font-family:'IBM Plex Sans', Arial, sans-serif;padding:64px;display:flex;flex-direction:column;gap:24px">
+<h2 style="font-size:44px;font-weight:700;line-height:1.15">SNR je Aufnahme <span style="color:#6A7179">· oben gefiltert, unten ungefiltert</span></h2>
+<div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:24px;flex:1;justify-items:center">
+<img src="bilder/tuh_resampelt_zeitreihe_3s_aaaaabqv_s002_t001.png" alt="aaaaabqv_s002_t001, SNR über die Zeit, gefiltert oben, ungefiltert unten, 11 Anfälle" style="width:884px;height:414px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+<img src="bilder/tuh_resampelt_zeitreihe_3s_aaaaadqe_s001_t001.png" alt="aaaaadqe_s001_t001, SNR über die Zeit, gefiltert oben, ungefiltert unten, 4 Anfälle" style="width:884px;height:414px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+<img src="bilder/tuh_resampelt_zeitreihe_3s_aaaaacyi_s001_t001.png" alt="aaaaacyi_s001_t001, SNR über die Zeit, gefiltert oben, ungefiltert unten, 9 Anfälle" style="grid-column:1 / span 2;width:884px;height:414px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+
+</div>
+<aside>Drei TUH-Absence-Aufnahmen, jeweils oben gefiltert (WB, 27 Kanäle), unten ungefiltert (21 Kanäle). Orange = Anfälle. Gefiltert liegt λ etwa 10-fach höher und ist voller Artefaktspitzen. bqv, 11 Anfälle: ungefiltert λ1 im Anfall 1,9–8,5-fach über dem anfallsfreien Median, 9 von 11 Anfällen vollständig über dem 90-%-Quantil; gefiltert nur 1 Anfall. dqe, 4 Anfälle: ungefiltert 2,9–4,3-fach, gefiltert 1,6–1,7-fach. cyi, 9 Anfälle: ungefiltert 3,2–6,8-fach, gefiltert 1,0–1,9-fach.</aside>
+</section></div><div class="nummer">3 / 10 · snr-faelle</div><div class="rahmen"><section id="dyca-absz" style="background:#f7f6f2">
+  <p id="e1-1u728rv" style="position:absolute; bottom:64px; left:128px; width:1664px; font-family:'IBM Plex Sans', Arial, sans-serif; font-size:24px; color:#6a7179">Beispiel aaaaabqv_s002_t001, 11 Anfälle · Werte: Median über die Aufnahmen · 4</p>
+  <p id="p06921f16ab7cr0-560c8a4e" style="position:absolute; top:128px; left:118.63px; width:1664px; font-family:'IBM Plex Sans', Arial, sans-serif; font-size:28px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:#2a6fdb">Absencen · DyCA</p>
+  <h2 id="p06921f16ab7cr1-560c8a4e" style="position:absolute; top:199px; left:128px; width:1664px; font-family:'IBM Plex Sans', Arial, sans-serif; font-size:60px; font-weight:700; line-height:1.1; color:#1b2430">DyCA erkennt Absencen, gefiltert wie ungefiltert</h2>
+  <div id="p06921f16ab7cr2-560c8a4e" style="position:absolute; top:297px; left:128px; width:1664px; height:550px; display:flex; flex-direction:row; gap:48px; align-items:start">
+    <img src="bilder/dyca_zeitreihe_3s_vergleich_wb_aaaaabqv_s002_t001.png" alt="DyCA-Eigenwerte über die Zeit in aaaaabqv_s002_t001: oben gefiltert, unten ungefiltert, alle 11 Anfälle als Spitzen sichtbar" style="width:1180px; height:550px; background:#ffffff; border-radius:12px; object-fit:contain">
+    <div style="display:flex; flex-direction:column; gap:20px; flex:1">
+      <p style="font-family:'IBM Plex Sans', Arial, sans-serif; font-size:28px; line-height:1.35; color:#4a5568">16 Aufnahmen, 61 Anfälle</p>
+      <table style="font-family:'IBM Plex Sans', Arial, sans-serif; font-size:30px; color:#1b2430">
+        <tr><th style="width:46%"></th><th style="width:27%; text-align:right">gefiltert</th><th style="width:27%; text-align:right">ungefiltert</th></tr>
+        <tr><td>AUC λ1</td><td style="text-align:right">0,99</td><td style="text-align:right">1,00</td></tr>
+        <tr><td>λ1 Anfall</td><td style="text-align:right">0,89</td><td style="text-align:right">0,86</td></tr>
+        <tr><td>λ1 sonst</td><td style="text-align:right">0,45</td><td style="text-align:right">0,36</td></tr>
+      </table>
+      <p style="font-family:'IBM Plex Sans', Arial, sans-serif; font-size:28px; line-height:1.35; color:#4a5568">Erlangen, Patientin CA: AUC 1,00 in allen 6 Dateien</p>
+    </div>
+  </div>
+  <aside>Oben gefiltert, unten ungefiltert, dieselbe Aufnahme. In beiden Versionen liegen alle 5 höchsten λ1-Spitzen im Anfall. DyCA ist also robust gegen die BESA-Filterung, anders als SNR. Ungefiltert sinkt nur der Grundpegel außerhalb der Anfälle, dadurch steigt die Korrelation r von 0,57 auf 0,67. Zwischen Dateien: 13 von 16 erreichen AUC mindestens 0,99. Ausreißer aaaaaccj_s003_t001 hat schon ohne Anfall λ1 0,78. Zwischen Anfällen: lange Absencen liegen höher, z. B. aaaaadyf mit 11–16 s bei 0,95–0,97, kurze bei etwa 0,73. Erlangen: Patient ME schwächer, AUC 0,82–1,00, λ1 im Anfall nur 0,43–0,65 bei kurzen Absencen von 2–6 s.</aside>
+</section></div><div class="nummer">4 / 10 · dyca-absz</div><div class="rahmen"><section id="dyca-faelle-1" style="background:#F7F6F2;color:#1B2430;font-family:'IBM Plex Sans', Arial, sans-serif;padding:64px;display:flex;flex-direction:column;gap:24px">
+<h2 style="font-size:44px;font-weight:700;line-height:1.15">DyCA je Aufnahme <span style="color:#6A7179">· TUH ungefiltert</span></h2>
+<img src="bilder/dyca_zeitreihe_3s_tuh_aaaaadyf_s001_t000.png" alt="aaaaadyf_s001_t000, DyCA-Eigenwerte über die Zeit, 6 Anfälle als Plateaus nahe 1" style="width:1792px;height:427px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+<img src="bilder/dyca_zeitreihe_3s_tuh_aaaaadqe_s001_t001.png" alt="aaaaadqe_s001_t001, DyCA-Eigenwerte über die Zeit, 4 Anfälle" style="width:1792px;height:427px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+<aside>Oben aaaaadyf_s001_t000: 6 lange Absencen von 11–16 s, AUC λ1 1,00, λ1 im Anfall 0,95–0,97, außerhalb Median 0,44. Unten aaaaadqe_s001_t001: 4 Anfälle von 10–23 s, AUC 0,99, λ1 im Anfall 0,89–0,94, außerhalb 0,37.</aside>
+</section></div><div class="nummer">5 / 10 · dyca-faelle-1</div><div class="rahmen"><section id="dyca-faelle-2" style="background:#F7F6F2;color:#1B2430;font-family:'IBM Plex Sans', Arial, sans-serif;padding:64px;display:flex;flex-direction:column;gap:24px">
+<h2 style="font-size:44px;font-weight:700;line-height:1.15">DyCA je Aufnahme <span style="color:#6A7179">· TUH ungefiltert</span></h2>
+<img src="bilder/dyca_zeitreihe_3s_tuh_aaaaadqe_s001_t002.png" alt="aaaaadqe_s001_t002, DyCA-Eigenwerte über die Zeit, 3 Anfälle" style="width:1792px;height:427px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+<img src="bilder/dyca_zeitreihe_3s_tuh_aaaaaccj_s002_t001.png" alt="aaaaaccj_s002_t001, DyCA-Eigenwerte über die Zeit, 5 kurze Anfälle als schmale Spitzen" style="width:1792px;height:427px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+<aside>Oben aaaaadqe_s001_t002: 3 Anfälle von 10–15 s, AUC 1,00, λ1 im Anfall 0,88–0,94. Unten aaaaaccj_s002_t001: 5 kurze Anfälle von 5–12 s, AUC 1,00, λ1 im Anfall 0,82–0,93, außerhalb Median 0,24. Auch kurze Anfälle heben sich klar ab; einzelne schmale Spitzen außerhalb erreichen bis 0,8.</aside>
+</section></div><div class="nummer">6 / 10 · dyca-faelle-2</div><div class="rahmen"><section id="erlangen-1" style="background:#F7F6F2;color:#1B2430;font-family:'IBM Plex Sans', Arial, sans-serif;padding:64px;display:flex;flex-direction:column;gap:24px">
+<h2 style="font-size:44px;font-weight:700;line-height:1.15">Erlangen, dieselbe Aufnahme <span style="color:#6A7179">· SNR oben, DyCA unten</span></h2>
+<div style="display:flex;gap:24px;align-items:center">
+<p style="width:120px;font-size:32px;font-weight:600;color:#2A6FDB">SNR</p>
+<img src="bilder/erlangen_zeitreihe_3s_130712BA_0003-export_Absc_5_Long_Raw.png" alt="Erlangen Absc_5, Patientin CA, SNR λ1 über die Zeit mit Anfall um 183–208 s" style="width:1648px;height:427px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+</div>
+<div style="display:flex;gap:24px;align-items:center">
+<p style="width:120px;font-size:32px;font-weight:600;color:#C9532A">DyCA</p>
+<img src="bilder/dyca_zeitreihe_3s_erlangen_130712BA_0003-export_Absc_5_Long_Raw.png" alt="Erlangen Absc_5, Patientin CA, DyCA λ1 über die Zeit, Anfall als Plateau nahe 1" style="width:1648px;height:427px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+</div>
+<aside>Patientin CA, Aufnahme 130712BA_0003, Absence von 25 s. SNR: AUC λ1 0,96, λ1 im Anfall 13,7-fach über dem anfallsfreien Median, aber außerhalb mehrere Artefaktspitzen in gleicher Höhe. DyCA: AUC 1,00, λ1 im Anfall 0,95, außerhalb 0,36, keine vergleichbaren Spitzen.</aside>
+</section></div><div class="nummer">7 / 10 · erlangen-1</div><div class="rahmen"><section id="erlangen-2" style="background:#F7F6F2;color:#1B2430;font-family:'IBM Plex Sans', Arial, sans-serif;padding:64px;display:flex;flex-direction:column;gap:24px">
+<h2 style="font-size:44px;font-weight:700;line-height:1.15">Erlangen, dieselbe Aufnahme <span style="color:#6A7179">· SNR oben, DyCA unten</span></h2>
+<div style="display:flex;gap:24px;align-items:center">
+<p style="width:120px;font-size:32px;font-weight:600;color:#2A6FDB">SNR</p>
+<img src="bilder/erlangen_zeitreihe_3s_130711BB_0005-export_Absc_2_Long_Raw.png" alt="Erlangen Absc_2, Patientin CA, SNR λ1 über die Zeit mit Anfall um 273–288 s und einem grauen Ereignis ohne Endzeit" style="width:1648px;height:427px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+</div>
+<div style="display:flex;gap:24px;align-items:center">
+<p style="width:120px;font-size:32px;font-weight:600;color:#C9532A">DyCA</p>
+<img src="bilder/dyca_zeitreihe_3s_erlangen_130711BB_0005-export_Absc_2_Long_Raw.png" alt="Erlangen Absc_2, Patientin CA, DyCA λ1 über die Zeit, Anfall und graues Ereignis als Plateaus nahe 1" style="width:1648px;height:427px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+</div>
+<aside>Patientin CA, Aufnahme 130711BB_0005, Absence von 15 s. Grau = Ereignis ohne Endzeit, als Sperrzone von der Bewertung ausgenommen. SNR: AUC 0,84, λ1 im Anfall nur 2,4-fach über anfallsfrei, viele gleich hohe Spitzen. DyCA: AUC 1,00, λ1 im Anfall 0,91, außerhalb 0,33. DyCA zeigt auch im grauen Ereignis ein Plateau nahe 0,9 – möglicherweise eine weitere, nicht vollständig annotierte Absence.</aside>
+</section></div><div class="nummer">8 / 10 · erlangen-2</div><div class="rahmen"><section id="fnsz-fall" style="background:#F7F6F2;color:#1B2430;font-family:'IBM Plex Sans', Arial, sans-serif;padding:64px;display:flex;flex-direction:column;gap:24px">
+<h2 style="font-size:44px;font-weight:700;line-height:1.15">FNSZ-Beispiel aaaaaghb_s010_t000 <span style="color:#6A7179">· ein Anfall, 25 s</span></h2>
+<div style="display:flex;gap:24px;align-items:center">
+<p style="width:200px;font-size:28px;font-weight:600;line-height:1.3;color:#2A6FDB">SNR<br>gefiltert</p>
+<img src="bilder/fnsz_ghb_snr_wb.png" alt="aaaaaghb, SNR gefiltert über die Zeit, λ im Anfall nicht erhöht" style="width:1260px;height:204px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+
+</div>
+<div style="display:flex;gap:24px;align-items:center">
+<p style="width:200px;font-size:28px;font-weight:600;line-height:1.3;color:#2A6FDB">SNR<br>ungefiltert</p>
+<img src="bilder/fnsz_ghb_snr_ungefiltert.png" alt="aaaaaghb, SNR ungefiltert über die Zeit, λ im Anfall leicht erhöht" style="width:1260px;height:204px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+
+</div>
+<div style="display:flex;gap:24px;align-items:center">
+<p style="width:200px;font-size:28px;font-weight:600;line-height:1.3;color:#C9532A">DyCA<br>gefiltert</p>
+<img src="bilder/fnsz_ghb_dyca_wb.png" alt="aaaaaghb, DyCA gefiltert über die Zeit, λ1 durchgehend um 0,75, kein Anstieg im Anfall" style="width:1260px;height:204px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+
+</div>
+<div style="display:flex;gap:24px;align-items:center">
+<p style="width:200px;font-size:28px;font-weight:600;line-height:1.3;color:#C9532A">DyCA<br>ungefiltert</p>
+<img src="bilder/fnsz_ghb_dyca_ungefiltert.png" alt="aaaaaghb, DyCA ungefiltert über die Zeit, λ1 im Anfall leicht erhöht" style="width:1260px;height:204px;object-fit:contain;background:#FFFFFF;border-radius:8px">
+
+</div>
+<aside>Rechts jeweils die AUC von λ1; 0,5 = Zufall, unter 0,5 heißt λ1 ist im Anfall niedriger als sonst. Dies ist das günstigste der 4 sauberen FNSZ-Paare: Ungefiltert steigt λ im Anfall bei beiden Methoden etwas an, gefiltert gar nicht. Selbst hier hebt sich der Anfall aber nicht so klar ab wie eine Absence; es gibt kein Plateau nahe 1 wie bei DyCA in Absencen. In den anderen drei Paaren ist das Bild uneinheitlich, z. B. aaaaajdj mit DyCA ungefiltert nur 0,08.</aside>
+</section></div><div class="nummer">9 / 10 · fnsz-fall</div><div class="rahmen"><section id="fazit" style="background:#1B2430;color:#F4F2EC;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:48px">
+<p style="font-size:28px;color:#F08A5D;font-weight:600;text-transform:uppercase;letter-spacing:2px">Fazit</p>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px">
+<div style="background:#253244;border-radius:16px;padding:40px;display:flex;flex-direction:column;gap:16px">
+<h3 style="font-size:40px;font-weight:700;color:#F4F2EC;line-height:1.2">DyCA besser als SNR</h3>
+<p style="font-size:28px;color:#C9D3DE;line-height:1.4">Bei Absencen 98 % erkannte Anfälle statt 52 %, bei weniger Fehlalarmen.</p>
+</div>
+<div style="background:#253244;border-radius:16px;padding:40px;display:flex;flex-direction:column;gap:16px">
+<h3 style="font-size:40px;font-weight:700;color:#F4F2EC;line-height:1.2">Filterung trifft nur SNR</h3>
+<p style="font-size:28px;color:#C9D3DE;line-height:1.4">SNR braucht ungefilterte Daten. DyCA ist gefiltert und ungefiltert gleich gut.</p>
+</div>
+<div style="background:#253244;border-radius:16px;padding:40px;display:flex;flex-direction:column;gap:16px">
+<h3 style="font-size:40px;font-weight:700;color:#F4F2EC;line-height:1.2">FNSZ offen</h3>
+<p style="font-size:28px;color:#C9D3DE;line-height:1.4">Beide Methoden nahe am Zufall. Mit 4 sauberen Paaren ist das nicht belastbar.</p>
+</div>
+</div>
+
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:24px;color:#8F9BA8">12</p>
+<aside>Mögliche nächste Schritte zur Diskussion: mehr FNSZ-Paare nutzen, indem unsaubere Paare auf den gemeinsamen Abschnitt gekürzt werden; DyCA-Plateau-Detektor auf Erlangen und auf gefilterten Daten prüfen; Patient ME mit kurzen Absencen genauer ansehen.</aside>
+</section></div><div class="nummer">10 / 10 · fazit</div><script>
+function skaliere(){
+  var b=Math.min(window.innerWidth-32,1920), s=b/1920;
+  document.querySelectorAll('.rahmen').forEach(function(r){
+    r.style.width=b+'px'; r.style.height=(1080*s)+'px';
+    r.firstElementChild.style.transform='scale('+s+')';
+  });
+}
+window.addEventListener('resize',skaliere); skaliere();
+</script></body></html>

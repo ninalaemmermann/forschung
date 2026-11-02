@@ -169,7 +169,7 @@ def tuh_referenz(ax, tuh, art, methode, log=True):
     lo, hi = np.percentile(P, [25, 75], axis=0)
     ax.fill_between(x, lo, hi, color=MUTED, alpha=0.15, linewidth=0)
     (ax.semilogy if log else ax.plot)(x, med, "-", color=MUTED, linewidth=1.5,
-                label="TUH-ABSZ (%d Pat.)%s" % (len(P), legende_zusatz(med, methode)))
+                label="TUHZ-ABSZ (%d Pat.)%s" % (len(P), legende_zusatz(med, methode)))
 
 
 def titelzeile(L, methode, skalieren):
@@ -214,7 +214,7 @@ def abbildung_patienten(e, tuh, L, methode, skalieren, ziel, log=True):
             P, _ = je_patient(tuh[art])
             if len(P):
                 linie(ax, P, FARBE[art], BESCHRIFTUNG[art], methode, n_text=" (%d Pat.)" % len(P), log=log)
-        rahmen(ax, "TUH-ABSZ, Median über Patienten — %s" % PANEL[methode], log, methode)
+        rahmen(ax, "TUHZ-ABSZ, Median über Patienten — %s" % PANEL[methode], log, methode)
     fig.tight_layout()
     fig.savefig(ziel, dpi=140)
     plt.close(fig)

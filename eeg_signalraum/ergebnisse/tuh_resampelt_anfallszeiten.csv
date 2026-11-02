@@ -1,0 +1,20 @@
+datei,name_master,labels,n_bi,n_master,status,max_abweichung_s,kanalweise_in_bi
+aaaaaazz_s001_t001,aaaaaazz_s001_t001,absz,9,0,nicht in Master,,True
+aaaaacyi_s001_t001,aaaaacyi_s001_t001,absz,9,9,gleich,0.0,True
+aaaaaewf_s001_t001,aaaaaewf_s001_t001,absz,2,2,gleich,0.0,True
+aaaaaexe_s001_t001,aaaaaexe_s001_t001,absz,4,4,gleich,0.0,True
+aaaaafcf_s009_t009,aaaaafcf_s009_t009,"absz,tcsz",50,0,nicht in Master,,True
+aaaaaasy_s001_t001,aaaaaasy_s001_t001,absz,1,0,nicht in Master,,True
+aaaaabqv_s001_t000,aaaaabqv_s001_t000,absz,3,3,gleich,0.0,True
+aaaaabqv_s002_t001,aaaaabqv_s002_t001,absz,11,11,gleich,0.0,True
+aaaaaccj_s001_t000,aaaaaccj_s001_t000,absz,3,3,gleich,0.0,True
+aaaaaccj_s002_t001,aaaaaccj_s002_t001,absz,5,5,gleich,0.0,True
+aaaaaccj_s003_t001,aaaaaccj_s003_t001,absz,3,3,gleich,0.0,True
+aaaaacrb_s001_t001,aaaaacrb_s001_t001,absz,2,2,Abweichung,9.76379999999999,True
+aaaaadqe_s001_t001,aaaaadqe_s001_t001,absz,4,4,gleich,0.0,True
+aaaaadqe_s001_t002,aaaaadqe_s001_t002,absz,3,3,gleich,0.0,True
+aaaaadqe_s001_t003,aaaaadqe_s001_t003,absz,2,2,gleich,0.0,True
+aaaaadqe_s001_t004,aaaaadqe_s001_t004,absz,1,1,gleich,0.0,True
+aaaaadyf_s001_t000,aaaaadyf_s001_t001,absz,6,6,gleich,0.0,True
+aaaaaenl_s001_t001,aaaaaenl_s001_t001,absz,1,1,gleich,0.0,True
+aaaaamtc_s001_t000,aaaaamtc_s001_t000,absz,2,2,gleich,0.0,True
